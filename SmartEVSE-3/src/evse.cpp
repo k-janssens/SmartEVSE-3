@@ -2851,7 +2851,8 @@ void StartwebServer(void) {
         String error = getErrorNameWeb(ErrorFlags);
         int errorId = getErrorId(ErrorFlags);
 
-        if(error == "Waiting for Solar") {
+        // if(error == "Waiting for Solar") {
+        if(errorId == 6) {
             evstate += " - " + error;
             error = "None";
             errorId = 0;
