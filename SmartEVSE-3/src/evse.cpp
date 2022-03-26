@@ -2661,6 +2661,8 @@ void write_settings(void) {
     preferences.putUChar("WIFImode", WIFImode);
     preferences.putString("APpassword", APpassword);
 
+    preferences.putBool("enable3f", enable3f);
+
     preferences.end();
 
 #ifdef LOG_INFO_EVSE
@@ -2893,6 +2895,7 @@ void StartwebServer(void) {
         doc["settings"]["solar_max_import"] = ImportCurrent;
         doc["settings"]["solar_start_current"] = StartCurrent;
         doc["settings"]["solar_stop_time"] = StopTime;
+        doc["settings"]["3phases_enabled"] = enable3f;
         
         doc["home_battery"]["current"] = homeBatteryCurrent;
         doc["home_battery"]["last_update"] = homeBatteryLastUpdate;
@@ -2986,14 +2989,17 @@ void StartwebServer(void) {
                     enable3f = false;
                     doc["enable_3phases"] = false;
                 }
+                write_settings();
 
                 if(request->hasParam("force_phases")) {
                     String force_phases = request->getParam("force_phases")->value();
                     if(force_phases.equalsIgnoreCase("true")) {
                         if(enable3f) {
                             CONTACTOR2_ON;
+                            doc["contactor2"] = true;
                         } else {
                             CONTACTOR2_OFF;
+                            doc["contactor2"] = false;
                         }
                     }
                 }
