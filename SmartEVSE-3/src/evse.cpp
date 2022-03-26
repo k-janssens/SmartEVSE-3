@@ -2237,7 +2237,6 @@ ModbusMessage MBMainsMeterResponse(ModbusMessage request) {
         // Calculate Isum (for nodes and master)
         Isum = 0; 
         int batteryPerPhase = getBatteryCurrent() / 3; // Divide the battery current per phase to spread evenly
-        
 
         for (x = 0; x < 3; x++) {
             // Calculate difference of Mains and PV electric meter
@@ -2978,6 +2977,35 @@ void StartwebServer(void) {
         serializeJson(doc, json);
 
         request->send(200, "application/json", json);
+    },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+    });
+
+    webServer.on("/phases", HTTP_POST, [](AsyncWebServerRequest *request) {
+        DynamicJsonDocument doc(200);
+        int batteryPerPhase = getBatteryCurrent() / 3;
+
+        if(request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3")) {
+            Irms[0] = request->getParam("L1")->value().toInt();
+            Irms[1] = request->getParam("L2")->value().toInt();
+            Irms[2] = request->getParam("L3")->value().toInt();
+            Isum = 0; 
+
+            for (int x = 0; x < 3; x++) {  
+                IrmsOriginal[x] = Irms[x];
+                doc["original"]["L" + x] = Irms[x];
+                Irms[x] -= batteryPerPhase;           
+                doc["L" + x] = Irms[x];
+                Isum = Isum + Irms[x];
+            }
+            doc["TOTAL"] = Isum;
+
+            UpdateCurrentData();
+        }
+
+        String json;
+        serializeJson(doc, json);
+        request->send(200, "application/json", json);
+
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
     });
 
