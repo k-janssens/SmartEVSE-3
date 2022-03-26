@@ -131,6 +131,8 @@ uint8_t RFIDReader = RFID_READER;                                           // R
 uint8_t WIFImode = WIFI_MODE;                                               // WiFi Mode (0:Disabled / 1:Enabled / 2:Start Portal)
 String APpassword = "00000000";
 
+boolean enable3f = USE_3PHASES;
+
 int32_t Irms[3]={0, 0, 0};                                                  // Momentary current per Phase (23 = 2.3A) (resolution 100mA)
                                                                             // Max 3 phases supported
 uint8_t State = STATE_A;
@@ -216,7 +218,6 @@ bool LocalTimeSet = false;
 int32_t IrmsOriginal[3]={0, 0, 0};   
 int homeBatteryCurrent = 0;
 int homeBatteryLastUpdate = 0; // Time in milliseconds
-boolean enable3f = false;
 
 struct EMstruct EMConfig[EM_CUSTOM + 1] = {
     /* DESC,      ENDIANNESS,      FCT, DATATYPE,            U_REG,DIV, I_REG,DIV, P_REG,DIV, E_REG,DIV */
@@ -1031,6 +1032,7 @@ uint8_t getMenuItems (void) {
         MenuItems[m++] = MENU_STOP;                                             // - Stop time (min)
         MenuItems[m++] = MENU_IMPORT;                                           // - Import Current from Grid (A)
     }
+    MenuItems[m++] = MENU_3F;
     MenuItems[m++] = MENU_LOADBL;                                               // Load Balance Setting (0:Disable / 1:Master / 2-8:Node)
     if (Mode && LoadBl < 2) {                                                   // ? Mode Smart/Solar and Load Balancing Disabled/Master?
         MenuItems[m++] = MENU_MAINS;                                            // - Max Mains Amps (hard limit, limited by the MAINS connection) (A) (Mode:Smart/Solar)
@@ -1100,6 +1102,9 @@ uint8_t setItemValue(uint8_t nav, uint16_t val) {
     }
 
     switch (nav) {
+        case MENU_3F:
+            enable3f = val == 1;
+            break;
         case MENU_CONFIG:
             Config = val;
             break;
@@ -1258,6 +1263,8 @@ uint8_t setItemValue(uint8_t nav, uint16_t val) {
  */
 uint16_t getItemValue(uint8_t nav) {
     switch (nav) {
+        case MENU_3F:
+            return enable3f;
         case MENU_CONFIG:
             return Config;
         case MENU_MODE:
@@ -1370,6 +1377,8 @@ const char * getMenuItemOption(uint8_t nav) {
     value = getItemValue(nav);
 
     switch (nav) {
+        case MENU_3F:
+            return enable3f ? "Yes" : "No";
         case MENU_CONFIG:
             if (Config) return StrFixed;
             else return StrSocket;
