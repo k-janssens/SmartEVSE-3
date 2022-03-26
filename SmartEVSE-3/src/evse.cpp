@@ -216,6 +216,7 @@ bool LocalTimeSet = false;
 int32_t IrmsOriginal[3]={0, 0, 0};   
 int homeBatteryCurrent = 0;
 int homeBatteryLastUpdate = 0; // Time in milliseconds
+boolean enable3f = false;
 
 struct EMstruct EMConfig[EM_CUSTOM + 1] = {
     /* DESC,      ENDIANNESS,      FCT, DATATYPE,            U_REG,DIV, I_REG,DIV, P_REG,DIV, E_REG,DIV */
@@ -593,8 +594,9 @@ void setState(uint8_t NewState) {
             break;      
         case STATE_C:                                                           // State C2
             ActivationMode = 255;                                               // Disable ActivationMode
-            CONTACTOR1_ON;                                                      // Contactor1 ON
-            CONTACTOR2_ON;                                                      // Contactor2 ON
+            CONTACTOR1_ON;      
+            if(Mode == MODE_NORMAL && enable3f)                                 // Contactor1 ON
+                CONTACTOR2_ON;                                                  // Contactor2 ON
             LCDTimer = 0;
             break;
         case STATE_C1:
@@ -2970,6 +2972,17 @@ void StartwebServer(void) {
                     doc["override_current"] = OverrideCurrent;
                 } else {
                     doc["override_current"] = "Value not allowed!";
+                }
+            }
+
+            if(request->hasParam("enable_3phases")) {
+                String enabled = request->getParam("enable_3phases")->value();
+                if(enabled.equalsIgnoreCase("true")) {
+                    enable3f = true;
+                    doc["enable_3phases"] = true;
+                } else {
+                    enable3f = false;
+                    doc["enable_3phases"] = false;
                 }
             }
         }
