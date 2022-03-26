@@ -2248,7 +2248,6 @@ ModbusMessage MBMainsMeterResponse(ModbusMessage request) {
         // Calculate Isum (for nodes and master)
         Isum = 0; 
         int batteryPerPhase = getBatteryCurrent() / 3; // Divide the battery current per phase to spread evenly
-        
 
         for (x = 0; x < 3; x++) {
             // Calculate difference of Mains and PV electric meter
