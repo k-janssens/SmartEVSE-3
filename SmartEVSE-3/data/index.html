@@ -46,6 +46,7 @@
             $('#current_min').text(data.settings.current_min.toFixed(1) + " A");
             $('#current_max').text(data.settings.current_max.toFixed(1) + " A");
             $('#override_current').text((data.settings.override_current/10).toFixed(1) + " A");
+            $('#enable_3phases').text(data.settings.enable_3phases ? "Yes" : "No");
 
             $('#battery_current').text(data.home_battery.current);
             $('#battery_last_update').text(data.home_battery.last_update);
@@ -157,6 +158,14 @@
                               <div class="row no-gutters align-items-center">
                                   <div class="col mr-2">
                                       <div class="text-xl font-weight-bold text-info text-uppercase mb-1">Current Details</div>
+                                      <div class="row no-gutters align-items-center">
+                                        <div class="col-auto h5 mb-0 mr-3 font-weight-bold text-gray-800" style="width: 120px;">
+                                            3 Phases:
+                                          </div>
+                                          <div class="col">
+                                            <div class="h5 mb-0 mr-3 text-gray-800" id="enable_3phases" style="text-align: right;"></div>
+                                          </div>
+                                      </div>
                                       <div class="row no-gutters align-items-center">
                                         <div class="col-auto h5 mb-0 mr-3 font-weight-bold text-gray-800" style="width: 120px;">
                                             Override:
