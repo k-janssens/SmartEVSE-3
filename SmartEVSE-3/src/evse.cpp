@@ -2607,6 +2607,8 @@ void read_settings(bool write) {
         EMConfig[EM_CUSTOM].Function = preferences.getUChar("EMFunction",EMCUSTOM_FUNCTION);
         WIFImode = preferences.getUChar("WIFImode",WIFI_MODE);
         APpassword = preferences.getString("APpassword",AP_PASSWORD);
+
+        enable3f = preferences.getUChar("enable3f", false); 
         
         preferences.end();                                  
 
@@ -2984,6 +2986,16 @@ void StartwebServer(void) {
                     enable3f = false;
                     doc["enable_3phases"] = false;
                 }
+
+                if(request->hasParam("force_phases")) {
+                    String force_phases = request->getParam("force_phases")->value();
+                    if(force_phases.equalsIgnoreCase("true")) {
+                        if(enable3f) {
+                            CONTACTOR2_ON;
+                        } else {
+                            CONTACTOR2_OFF;
+                        }
+                    }
             }
         }
 
