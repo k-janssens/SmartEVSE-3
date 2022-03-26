@@ -2996,6 +2996,7 @@ void StartwebServer(void) {
                             CONTACTOR2_OFF;
                         }
                     }
+                }
             }
         }
 
