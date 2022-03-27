@@ -302,7 +302,8 @@
 #define EM_ABB 5
 #define EM_SOLAREDGE 6
 #define EM_WAGO 7
-#define EM_CUSTOM 8
+#define EM_API 8
+#define EM_CUSTOM 9
 
 #define ENDIANESS_LBF_LWF 0
 #define ENDIANESS_LBF_HWF 1
