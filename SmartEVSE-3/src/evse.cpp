@@ -3003,7 +3003,7 @@ void StartwebServer(void) {
                     String force_phases = request->getParam("force_phases")->value();
                     if(force_phases.equalsIgnoreCase("true")) {
                         if(enable3f) {
-                            CONTACTOR2_ON;
+                            // CONTACTOR2_ON; TODO must take into account the STATE ???
                             doc["contactor2"] = true;
                         } else {
                             CONTACTOR2_OFF;
