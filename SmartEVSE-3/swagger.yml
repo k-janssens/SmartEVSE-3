@@ -170,6 +170,7 @@ paths:
         - in: query
           name: L1
           description: |-
+            Note: Only works when MainsMeter == API <br />
             L1, L2 and L3 must be send all together otherwise the data won't be registered.
             Value must be multiplied by 10 <br />
           required: false
@@ -178,6 +179,7 @@ paths:
         - in: query
           name: L2
           description: |-
+            Note: Only works when MainsMeter == API <br />
             L1, L2 and L3 must be send all together otherwise the data won't be registered.
             Value must be multiplied by 10 <br />
           required: false
@@ -186,6 +188,7 @@ paths:
         - in: query
           name: L3
           description: |-
+            Note: Only works when MainsMeter == API <br />
             L1, L2 and L3 must be send all together otherwise the data won't be registered.
             Value must be multiplied by 10 <br />
           required: false

@@ -2996,24 +2996,26 @@ void StartwebServer(void) {
             doc["battery_current"] = homeBatteryCurrent;
         }
 
-        if(request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3")) {
-            phasesLastUpdate = time(NULL);
+        if(MainsMeter == EM_API) {
+            if(request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3")) {
+                phasesLastUpdate = time(NULL);
 
-            Irms[0] = request->getParam("L1")->value().toInt();
-            Irms[1] = request->getParam("L2")->value().toInt();
-            Irms[2] = request->getParam("L3")->value().toInt();
+                Irms[0] = request->getParam("L1")->value().toInt();
+                Irms[1] = request->getParam("L2")->value().toInt();
+                Irms[2] = request->getParam("L3")->value().toInt();
 
-            int batteryPerPhase = getBatteryCurrent() / 3;
-            Isum = 0; 
-            for (int x = 0; x < 3; x++) {  
-                IrmsOriginal[x] = Irms[x];
-                doc["original"]["L" + x] = Irms[x];
-                Irms[x] -= batteryPerPhase;           
-                doc["L" + x] = Irms[x];
-                Isum = Isum + Irms[x];
+                int batteryPerPhase = getBatteryCurrent() / 3;
+                Isum = 0; 
+                for (int x = 0; x < 3; x++) {  
+                    IrmsOriginal[x] = Irms[x];
+                    doc["original"]["L" + x] = Irms[x];
+                    Irms[x] -= batteryPerPhase;           
+                    doc["L" + x] = Irms[x];
+                    Isum = Isum + Irms[x];
+                }
+                doc["TOTAL"] = Isum;
+                UpdateCurrentData();
             }
-            doc["TOTAL"] = Isum;
-            UpdateCurrentData();
         }
 
         String json;
