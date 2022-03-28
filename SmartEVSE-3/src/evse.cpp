@@ -644,6 +644,8 @@ int getBatteryCurrent(void) {
     if (Mode == MODE_SOLAR && homeBatteryLastUpdate > (currentTime)) {
         return homeBatteryCurrent;
     } else {
+        homeBatteryCurrent = 0;
+        homeBatteryLastUpdate = 0;
         return 0;
     }
 }
@@ -2022,6 +2024,11 @@ void Timer1S(void * parameter) {
             Irms[2] = 0;
             Isum = 0; 
             UpdateCurrentData();
+        }
+
+        if (homeBatteryLastUpdate != 0 && homeBatteryLastUpdate < (time(NULL) - 60)) {
+            homeBatteryCurrent = 0;
+            homeBatteryLastUpdate = 0;
         }
 
         if (BacklightTimer) BacklightTimer--;                               // Decrease backlight counter every second.
