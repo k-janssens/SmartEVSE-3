@@ -120,7 +120,7 @@ paths:
         - in: query
           name: disable_override_current
           description: |-
-            Disable override current value
+            If this parameter is passed the override current will be reset (value doesn't matter)
           required: false
           allowEmptyValue: true
           schema:
@@ -137,12 +137,57 @@ paths:
           required: false
           schema:
             type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Nullable'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result: 
+                    type: string
+  /currents:
+    post:
+      operationId: updateCurrentsData
+      tags:
+        - Operations
+      parameters:
         - in: query
           name: battery_current
           description: |-
             Actual home battery current multiplied by 10 <br />
             A <b>positive</b> number means the home battery is <b>charging</b> <br />
             A <b>negative</b> number means the home battery is<b> discharging</b> <br />
+          required: false
+          schema:
+            type: integer
+        - in: query
+          name: L1
+          description: |-
+            L1, L2 and L3 must be send all together otherwise the data won't be registered.
+            Value must be multiplied by 10 <br />
+          required: false
+          schema:
+            type: integer
+        - in: query
+          name: L2
+          description: |-
+            L1, L2 and L3 must be send all together otherwise the data won't be registered.
+            Value must be multiplied by 10 <br />
+          required: false
+          schema:
+            type: integer
+        - in: query
+          name: L3
+          description: |-
+            L1, L2 and L3 must be send all together otherwise the data won't be registered.
+            Value must be multiplied by 10 <br />
           required: false
           schema:
             type: integer

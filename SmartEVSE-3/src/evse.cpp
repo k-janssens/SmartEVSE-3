@@ -2936,13 +2936,6 @@ void StartwebServer(void) {
             doc["Backlight"] = backlight;
         }
 
-        if(request->hasParam("battery_current")) {
-            String value = request->getParam("battery_current")->value();
-            homeBatteryCurrent = value.toInt();
-            homeBatteryLastUpdate = time(NULL);
-            doc["battery_current"] = homeBatteryCurrent;
-        }
-
         if(request->hasParam("disable_override_current")) {
             OverrideCurrent = 0;
             doc["disable_override_current"] = "OK";
@@ -2993,7 +2986,7 @@ void StartwebServer(void) {
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
     });
 
-    webServer.on("/phases", HTTP_POST, [](AsyncWebServerRequest *request) {
+    webServer.on("/currents", HTTP_POST, [](AsyncWebServerRequest *request) {
         DynamicJsonDocument doc(200);
 
         if(request->hasParam("battery_current")) {
