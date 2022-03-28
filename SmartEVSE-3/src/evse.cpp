@@ -3023,6 +3023,19 @@ void StartwebServer(void) {
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
     });
 
+    webServer.on("/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
+        DynamicJsonDocument doc(200);
+
+        ESP.restart();
+        doc["reboot"] = true;
+
+        String json;
+        serializeJson(doc, json);
+        request->send(200, "application/json", json);
+
+    },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+    });
+
     // attach filesystem root at URL /
     webServer.serveStatic("/", SPIFFS, "/");
 
