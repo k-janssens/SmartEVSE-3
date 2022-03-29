@@ -46,8 +46,10 @@
                     text: x + 'A'
                 }));
 
-                $('#mode_override_current').val(maxCurrent);
+                // $('#mode_override_current').val(maxCurrent);
               }
+
+              $('#mode_' + data.mode_id).css("background-color", "#1CC88A");
             }
 
             $('#mode').text(data.mode);
@@ -454,7 +456,9 @@
                                           Current:
                                         </div>
                                         <div class="col">
-                                          <select id="mode_override_current"></select>
+                                          <select id="mode_override_current">
+                                            <option value="0">Choose Ampere</option>
+                                          </select>
                                         </div>
                                     </div>
                                 </div>
