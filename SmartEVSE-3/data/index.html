@@ -48,9 +48,18 @@
 
                 // $('#mode_override_current').val(maxCurrent);
               }
-
-              $('#mode_' + data.mode_id).css("background-color", "#1CC88A");
             }
+
+            for(let x=0; x<=3; x++) {
+              if(x == data.mode_id) {
+                $('#mode_' + x).css("background-color", "#1CC88A");
+              } else {
+                $('#mode_' + x).css("background-color", "#EDEDED");    
+              }
+            }
+            $('#mode_' + data.mode_id).css("background-color", "#1CC88A");
+            // $('#mode_override_current').val((data.settings.override_current/10).toFixed(1));
+
 
             $('#mode').text(data.mode);
             $('#car_connected').text(data.car_connected ? "Yes" : "No");
