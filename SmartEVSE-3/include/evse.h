@@ -489,6 +489,7 @@ void CheckAPpassword(void);
 void read_settings(bool write);
 void write_settings(void);
 void setSolarStopTimer(uint16_t Timer);
+void setState(uint8_t NewState, boolean forceState);
 void setState(uint8_t NewState);
 void setAccess(bool Access);
 uint8_t getMenuItems(void);

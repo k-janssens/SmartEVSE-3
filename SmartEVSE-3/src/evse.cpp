@@ -555,10 +555,13 @@ void setSolarStopTimer(uint16_t Timer) {
     SolarStopTimer = Timer;
 }
 
-
 void setState(uint8_t NewState) {
+    setState(NewState, false);
+}
 
-    if (State != NewState) {
+void setState(uint8_t NewState, bool forceState) {
+
+    if (State != NewState || forceState) {
         
         char Str[50];
         snprintf(Str, 50, "#%02d:%02d:%02d STATE %s -> %s\n",timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, getStateName(State), getStateName(NewState) ); 
@@ -3027,18 +3030,12 @@ void StartwebServer(void) {
                     doc["enable_3phases"] = false;
                 }
                 write_settings();
+            }
 
-                if(request->hasParam("force_phases")) {
-                    String force_phases = request->getParam("force_phases")->value();
-                    if(force_phases.equalsIgnoreCase("true")) {
-                        if(enable3f) {
-                            // CONTACTOR2_ON; TODO must take into account the STATE ???
-                            doc["contactor2"] = true;
-                        } else {
-                            CONTACTOR2_OFF;
-                            doc["contactor2"] = false;
-                        }
-                    }
+            if(request->hasParam("force_phases")) {
+                String force_phases = request->getParam("force_phases")->value();
+                if(force_phases.equalsIgnoreCase("true")) {
+                    setState(State, true);
                 }
             }
         }

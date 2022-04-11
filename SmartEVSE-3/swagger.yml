@@ -173,7 +173,7 @@ paths:
         - in: query
           name: force_phases
           description: |-
-            Works only when using enable_3phases<br />
+            Works only when 3phases are enabled (using the EVSE menu or the enable_3phases parameter)<br />
             Immediatly force contactor 2 to be opened/closed <br />
           required: false
           schema:
