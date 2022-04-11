@@ -105,16 +105,6 @@
             $('#phase_original_2').text((data.phase_currents.original_data.L2/10).toFixed(1) + " A");
             $('#phase_original_3').text((data.phase_currents.original_data.L3/10).toFixed(1) + " A");
 
-            $('#phase_total').text((data.phase_currents.TOTAL/10).toFixed(1) + " A");
-            $('#phase_1').text((data.phase_currents.L1/10).toFixed(1) + " A");
-            $('#phase_2').text((data.phase_currents.L2/10).toFixed(1) + " A");
-            $('#phase_3').text((data.phase_currents.L3/10).toFixed(1) + " A");
-
-            $('#phase_original_total').text((data.phase_currents.original_data.TOTAL/10).toFixed(1) + " A");
-            $('#phase_original_1').text((data.phase_currents.original_data.L1/10).toFixed(1) + " A");
-            $('#phase_original_2').text((data.phase_currents.original_data.L2/10).toFixed(1) + " A");
-            $('#phase_original_3').text((data.phase_currents.original_data.L3/10).toFixed(1) + " A");
-
             setTimeout("loadData()", 5000);
           });
       }
