@@ -1,6 +1,6 @@
 Forked from: https://github.com/SmartEVSE/SmartEVSE-3
 
-# Note:
+# Note
 <span style="color:red">
 This fork is exploring the capabilities in modifying the Smart-EVSEv3 firmware.<br/>
 Feel free to use this repository to build it yourself or to use the latest on from the *releases* folder <b>but this is on your own risk</b>.
@@ -8,15 +8,21 @@ Feel free to use this repository to build it yourself or to use the latest on fr
 <br />
 <br />
 
-# Changes in regards with the original firmware:
+# Changes in regards with the original firmware
 * New Status page using the Rest API
 * Disabled WebSockets
 * Reduced max backlight brightness
-* Callable API endpoints for easy integration (e.g. Home Assistant)
 * Home battery integration
+* Endpoint to send L1/2/3 data, this removed the need for a SensorBox
+  * Note: Set MainsMeter to the new 'API' option in the config menu when sending L1/2/3
+* Callable API endpoints for easy integration (e.g. Home Assistant) - (See [API Overview](#API-Overview))
+  * Change charging mode
+  * Override charge current
+  * Pass in current measurements (p1, battery, ...) - this eliminates having to use additionalhard
+  * Switch between single- and three phase power (requires extra 2P relais on the 2nd output)
 
 # New Status Page
-![Status Page](/pictures/status-page.png)
+![image](https://user-images.githubusercontent.com/36994651/160653707-121dd618-ee0d-4cb3-bc39-82fde1a1a653.png)
 
 
 # Home Battery Integration
@@ -29,7 +35,7 @@ For this purpose the settings endpoint allows you to pass through the battery cu
 The EVSE will use the battery current to neutralize the impact of a home battery on the P1 information.<br>
 **Regular updates from the consumer are required to keep this working as values cannot be older than 60 seconds.**
 
-### Example:
+### Example
 * Home battery is charging at 2300W -> 10A
 * P1 has an export value of 230W -> -1A
 * EVSE will neutralize the battery and P1 will be "exporting" -11A
@@ -39,5 +45,8 @@ The sender has several options when sending the home battery current:
 * Only send when battery is discharging -> AS-IS operation but EVSE will not discharge the home battery
 * Reserve an amount of current for the home battery (e.g. 10A) -> Prioritize the home battery up to a specific limit
 
-# API Overview:
-https://app.swaggerhub.com/apis/kryztov/Smart-EVSE-V3A/1.0.0
+# API Overview
+View API <a href="https://swagger-ui.serkri.be/" target="_blank">https://swagger-ui.serkri.be/</a>
+
+
+Have an idea for the API? Edit it here <a href="https://swagger-editor.serkri.be/" target="_blank">https://swagger-editor.serkri.be/</a> and copy/paste it in a new issue with your request (https://github.com/serkri/SmartEVSE-3/issues)

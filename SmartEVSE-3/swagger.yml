@@ -13,7 +13,7 @@ paths:
         - Operations
       responses:
         '200':
-          description: Authentication successful
+          description: Operation OK
           content:
             application/json:
               schema:
@@ -122,7 +122,7 @@ paths:
         - in: query
           name: disable_override_current
           description: |-
-            Disable override current value
+            If this parameter is passed the override current will be reset (value doesn't matter)
           required: false
           allowEmptyValue: true
           schema:
@@ -139,6 +139,27 @@ paths:
           required: false
           schema:
             type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Nullable'
+      responses:
+        '200':
+          description: Operation OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result: 
+                    type: string
+  /currents:
+    post:
+      operationId: updateCurrentsData
+      tags:
+        - Operations
+      parameters:
         - in: query
           name: enable_3phases
           description: |-
@@ -166,6 +187,33 @@ paths:
           required: false
           schema:
             type: integer
+        - in: query
+          name: L1
+          description: |-
+            Note: Only works when MainsMeter == API <br />
+            L1, L2 and L3 must be send all together otherwise the data won't be registered.<br />
+            Ampere must be multiplied by 10 <br />
+          required: false
+          schema:
+            type: integer
+        - in: query
+          name: L2
+          description: |-
+            Note: Only works when MainsMeter == API <br />
+            L1, L2 and L3 must be send all together otherwise the data won't be registered.<br />
+            Ampere must be multiplied by 10 <br />
+          required: false
+          schema:
+            type: integer
+        - in: query
+          name: L3
+          description: |-
+            Note: Only works when MainsMeter == API <br />
+            L1, L2 and L3 must be send all together otherwise the data won't be registered.<br />
+            Ampere must be multiplied by 10 <br />
+          required: false
+          schema:
+            type: integer
       requestBody:
         content:
           application/json:
@@ -173,7 +221,27 @@ paths:
               $ref: '#/components/schemas/Nullable'
       responses:
         '200':
-          description: Authentication successful
+          description: Operation OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result: 
+                    type: string
+  /reboot:
+    post:
+      operationId: rebootEvse
+      tags:
+        - Operations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Nullable'
+      responses:
+        '200':
+          description: Operation OK
           content:
             application/json:
               schema:

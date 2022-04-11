@@ -215,6 +215,7 @@ char str[20];
 int avgsamples = 0;
 bool LocalTimeSet = false;
 
+int phasesLastUpdate = 0;
 int32_t IrmsOriginal[3]={0, 0, 0};   
 int homeBatteryCurrent = 0;
 int homeBatteryLastUpdate = 0; // Time in milliseconds
@@ -229,6 +230,7 @@ struct EMstruct EMConfig[EM_CUSTOM + 1] = {
     {"ABB",       ENDIANESS_HBF_HWF, 3, MB_DATATYPE_INT32,   0x5B00, 1, 0x5B0C, 2, 0x5B14, 2, 0x5002, 2}, // ABB B23 212-100 (0.1V / 0.01A / 0.01W / 0.01kWh) RS485 wiring reversed / max read count 125
     {"SolarEdge", ENDIANESS_HBF_HWF, 3, MB_DATATYPE_INT16,    40196, 0,  40191, 0,  40083, 0,  40226, 3}, // SolarEdge SunSpec (0.01V (16bit) / 0.1A (16bit) / 1W  (16bit) / 1 Wh (32bit))
     {"WAGO",      ENDIANESS_HBF_HWF, 3, MB_DATATYPE_FLOAT32, 0x5002, 0, 0x500C, 0, 0x5012, 3, 0x6000, 0}, // WAGO 879-30x0 (V / A / kW / kWh)
+    {"API",       ENDIANESS_HBF_HWF, 3, MB_DATATYPE_FLOAT32, 0x5002, 0, 0x500C, 0, 0x5012, 3, 0x6000, 0}, // WAGO 879-30x0 (V / A / kW / kWh)
     {"Custom",    ENDIANESS_LBF_LWF, 4, MB_DATATYPE_INT32,        0, 0,      0, 0,      0, 0,      0, 0}  // Last entry!
 };
 
@@ -640,11 +642,13 @@ void setAccess(bool Access) {
  */
 // 
 int getBatteryCurrent(void) {
-    int currentTime = time(NULL) - 60000; // The data should not be older than 1 minute
+    int currentTime = time(NULL) - 60; // The data should not be older than 1 minute
     
     if (Mode == MODE_SOLAR && homeBatteryLastUpdate > (currentTime)) {
         return homeBatteryCurrent;
     } else {
+        homeBatteryCurrent = 0;
+        homeBatteryLastUpdate = 0;
         return 0;
     }
 }
@@ -1050,7 +1054,7 @@ uint8_t getMenuItems (void) {
     if (Mode) {                                                                 // ? Smart or Solar mode?
         if (LoadBl < 2) {                                                       // - ? Load Balancing Disabled/Master?
             MenuItems[m++] = MENU_MAINSMETER;                                   // - - Type of Mains electric meter (0: Disabled / Constants EM_*)
-            if (MainsMeter == EM_SENSORBOX) {                                   // - - ? Sensorbox?
+            if (MainsMeter == EM_SENSORBOX || MainsMeter == EM_API) {                                   // - - ? Sensorbox?
                 if (GridActive == 1) MenuItems[m++] = MENU_GRID;
                 if (CalActive == 1) MenuItems[m++] = MENU_CAL;                  // - - - Sensorbox CT measurement calibration
             } else if(MainsMeter) {                                             // - - ? Other?
@@ -2024,6 +2028,21 @@ void Timer1S(void * parameter) {
 
     while(1) { // infinite loop
 
+        // Reset data if API data is too old
+        if (MainsMeter == EM_API && phasesLastUpdate < (time(NULL) - 60)) {
+            phasesLastUpdate=0;
+            Irms[0] = 0;
+            Irms[1] = 0;
+            Irms[2] = 0;
+            Isum = 0; 
+            UpdateCurrentData();
+        }
+
+        if (homeBatteryLastUpdate != 0 && homeBatteryLastUpdate < (time(NULL) - 60)) {
+            homeBatteryCurrent = 0;
+            homeBatteryLastUpdate = 0;
+        }
+
         if (BacklightTimer) BacklightTimer--;                               // Decrease backlight counter every second.
 
         // wait for Activation mode to start
@@ -2043,9 +2062,6 @@ void Timer1S(void * parameter) {
                 ChargeTimer = 15;
             }
         }
-
-
-
 
         // once a second, measure temperature
         // range -40 .. +125C
@@ -2102,8 +2118,7 @@ void Timer1S(void * parameter) {
             if (BalancedState[x] == STATE_C) Node[x].Timer++;
         }
 
-        if ((timeout == 0) && !(ErrorFlags & CT_NOCOMM))                    // timeout if CT current measurement takes > 10 secs
-        {
+        if ( (timeout == 0) && !(ErrorFlags & CT_NOCOMM) && MainsMeter != EM_API) { // timeout if CT current measurement takes > 10 secs
             ErrorFlags |= CT_NOCOMM;
             if (State == STATE_C) setState(STATE_C1);                       // tell EV to stop charging
             else setState(STATE_B1);                                        // when we are not charging switch to State B1
@@ -2246,6 +2261,8 @@ ModbusMessage MBMainsMeterResponse(ModbusMessage request) {
         if (x && LoadBl <2) timeout = 10;                   // only reset timeout when data is ok, and Master/Disabled
 
         // Calculate Isum (for nodes and master)
+
+        phasesLastUpdate=time(NULL);
         Isum = 0; 
         int batteryPerPhase = getBatteryCurrent() / 3; // Divide the battery current per phase to spread evenly
 
@@ -2450,6 +2467,8 @@ void MBhandleError(Error error, uint32_t token)
   
 void ConfigureModbusMode(uint8_t newmode) {
 
+    if(MainsMeter == EM_API) return;
+
     Serial.printf("changing LoadBL from %u to %u\n",LoadBl, newmode);
     
     if ((LoadBl < 2 && newmode > 1) || (LoadBl > 1 && newmode < 2) || (newmode == 255) ) {
@@ -2469,7 +2488,7 @@ void ConfigureModbusMode(uint8_t newmode) {
             // Also add handler for all broadcast messages from Master.
             MBserver.registerWorker(BROADCAST_ADR, ANY_FUNCTION_CODE, &MBbroadcast);
 
-            if (MainsMeter) MBserver.registerWorker(MainsMeterAddress, ANY_FUNCTION_CODE, &MBMainsMeterResponse);
+            if (MainsMeter != EM_API) MBserver.registerWorker(MainsMeterAddress, ANY_FUNCTION_CODE, &MBMainsMeterResponse);
             if (EVMeter) MBserver.registerWorker(EVMeterAddress, ANY_FUNCTION_CODE, &MBEVMeterResponse);
             if (PVMeter) MBserver.registerWorker(PVMeterAddress, ANY_FUNCTION_CODE, &MBPVMeterResponse);
 
@@ -2879,7 +2898,7 @@ void StartwebServer(void) {
         }
 
         DynamicJsonDocument doc(1024); // https://arduinojson.org/v6/assistant/
-        doc["version"] = String(VERSION) + "-API";
+        doc["version"] = String(VERSION);
         doc["mode"] = mode;
         doc["mode_id"] = modeId;
         doc["car_connected"] = evConnected;
@@ -2895,6 +2914,21 @@ void StartwebServer(void) {
         doc["evse"]["error"] = error;
         doc["evse"]["error_id"] = errorId;
 
+        if (RFIDReader) {
+            switch(RFIDstatus) {
+                case 0:
+                case 1: doc["evse"]["rfid"] = "Present"; break;
+                case 2: doc["evse"]["rfid"] = "Card Stored"; break;
+                case 3: doc["evse"]["rfid"] = "Card Deleted"; break;
+                case 4: doc["evse"]["rfid"] = "Card already stored"; break;
+                case 5: doc["evse"]["rfid"] = "Card not in storage"; break;
+                case 6: doc["evse"]["rfid"] = "Card Storage full"; break;
+                case 7: doc["evse"]["rfid"] = "Invalid"; break;
+            }
+         } else {
+             doc["evse"]["rfid"] = "Not Installed";
+         }
+
         doc["settings"]["charge_current"] = Balanced[0];
         doc["settings"]["override_current"] = OverrideCurrent;
         doc["settings"]["current_min"] = MinCurrent;
@@ -2904,6 +2938,7 @@ void StartwebServer(void) {
         doc["settings"]["solar_start_current"] = StartCurrent;
         doc["settings"]["solar_stop_time"] = StopTime;
         doc["settings"]["3phases_enabled"] = enable3f;
+        doc["settings"]["mains_meter"] = EMConfig[MainsMeter].Desc;
         
         doc["home_battery"]["current"] = homeBatteryCurrent;
         doc["home_battery"]["last_update"] = homeBatteryLastUpdate;
@@ -2912,6 +2947,7 @@ void StartwebServer(void) {
         doc["phase_currents"]["L1"] = Irms[0];
         doc["phase_currents"]["L2"] = Irms[1];
         doc["phase_currents"]["L3"] = Irms[2];
+        doc["phase_currents"]["last_data_update"] = phasesLastUpdate;
         doc["phase_currents"]["original_data"]["TOTAL"] = IrmsOriginal[0] + IrmsOriginal[1] + IrmsOriginal[2];
         doc["phase_currents"]["original_data"]["L1"] = IrmsOriginal[0];
         doc["phase_currents"]["original_data"]["L2"] = IrmsOriginal[1];
@@ -2937,13 +2973,6 @@ void StartwebServer(void) {
             int backlight = current.toInt();
             ledcWrite(LCD_CHANNEL, backlight);
             doc["Backlight"] = backlight;
-        }
-
-        if(request->hasParam("battery_current")) {
-            String value = request->getParam("battery_current")->value();
-            homeBatteryCurrent = value.toInt();
-            homeBatteryLastUpdate = time(NULL);
-            doc["battery_current"] = homeBatteryCurrent;
         }
 
         if(request->hasParam("disable_override_current")) {
@@ -3018,6 +3047,58 @@ void StartwebServer(void) {
         serializeJson(doc, json);
 
         request->send(200, "application/json", json);
+    },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+    });
+
+    webServer.on("/currents", HTTP_POST, [](AsyncWebServerRequest *request) {
+        DynamicJsonDocument doc(200);
+
+        if(request->hasParam("battery_current")) {
+            String value = request->getParam("battery_current")->value();
+            homeBatteryCurrent = value.toInt();
+            homeBatteryLastUpdate = time(NULL);
+            doc["battery_current"] = homeBatteryCurrent;
+        }
+
+        if(MainsMeter == EM_API) {
+            if(request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3")) {
+                phasesLastUpdate = time(NULL);
+
+                Irms[0] = request->getParam("L1")->value().toInt();
+                Irms[1] = request->getParam("L2")->value().toInt();
+                Irms[2] = request->getParam("L3")->value().toInt();
+
+                int batteryPerPhase = getBatteryCurrent() / 3;
+                Isum = 0; 
+                for (int x = 0; x < 3; x++) {  
+                    IrmsOriginal[x] = Irms[x];
+                    doc["original"]["L" + x] = Irms[x];
+                    Irms[x] -= batteryPerPhase;           
+                    doc["L" + x] = Irms[x];
+                    Isum = Isum + Irms[x];
+                }
+                doc["TOTAL"] = Isum;
+                UpdateCurrentData();
+            }
+        }
+
+        String json;
+        serializeJson(doc, json);
+        request->send(200, "application/json", json);
+
+    },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+    });
+
+    webServer.on("/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
+        DynamicJsonDocument doc(200);
+
+        ESP.restart();
+        doc["reboot"] = true;
+
+        String json;
+        serializeJson(doc, json);
+        request->send(200, "application/json", json);
+
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
     });
 
