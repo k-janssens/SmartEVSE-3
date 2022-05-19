@@ -35,6 +35,9 @@
 #include "OneWire.h"
 #include "modbus.h"
 
+#ifndef DEBUG_DISABLED
+RemoteDebug Debug;
+#endif
 
 const char* NTP_SERVER = "europe.pool.ntp.org";        // only one server is supported
 
@@ -3259,6 +3262,11 @@ void WiFiSetup(void) {
     // test code, sets time to 31-OCT, 02:59:50 , 10 seconds before DST will be switched off
     //timeval epoch = {1635641990, 0};                    
     //settimeofday((const timeval*)&epoch, 0);            
+
+#ifndef DEBUG_DISABLED
+    // Initialize the server (telnet or web socket) of RemoteDebug
+    Debug.begin(APhostname);
+#endif
 }
 
 
@@ -3295,6 +3303,11 @@ void SetupNetworkTask(void * parameter) {
         Serial.print("Stopping WiFi..\n");
         WiFi.disconnect(true);
     }    
+
+#ifndef DEBUG_DISABLED
+    // Remote debug over WiFi
+    Debug.handle();
+#endif
 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   } // while(1)

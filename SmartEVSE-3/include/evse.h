@@ -25,9 +25,17 @@
 
 #define __EVSE_MAIN
 
+//uncomment for production release, comment this to debug:
+//#define DEBUG_DISABLED 1
+
 #ifndef VERSION
+#ifdef DEBUG_DISABLED
 #define VERSION "v3serkri-0.00"
+#else
+#define VERSION "v3serkri-0.00-debug"
 #endif
+#endif
+
 
 #define LOG_DEBUG 3                                                             // Debug messages including measurement data
 #define LOG_INFO 2                                                              // Information messages without measurement data
@@ -36,6 +44,12 @@
 
 #define LOG_EVSE LOG_INFO                                                       // Default: LOG_INFO
 #define LOG_MODBUS LOG_WARN                                                     // Default: LOG_WARN
+
+
+#include "RemoteDebug.h"  //https://github.com/JoaoLopesF/RemoteDebug
+#ifndef DEBUG_DISABLED // Only if debug is not disabled (for production/release)
+// RemoteDebug addon library: RemoteDebugger, an Simple software debugger - based on SerialDebug Library
+#endif
 
 
 #define TRANSFORMER_COMP 100   
