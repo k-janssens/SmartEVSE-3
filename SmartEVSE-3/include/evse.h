@@ -26,7 +26,7 @@
 #define __EVSE_MAIN
 
 //uncomment for production release, comment this to debug:
-//#define DEBUG_DISABLED 1
+#define DEBUG_DISABLED 1
 
 #ifndef VERSION
 #ifdef DEBUG_DISABLED
@@ -46,9 +46,16 @@
 #define LOG_MODBUS LOG_WARN                                                     // Default: LOG_WARN
 
 
+#ifdef DEBUG_DISABLED
+#define _Serialprintf Serial.printf //for standard use of the serial line
+#define _Serialprintln Serial.println //for standard use of the serial line
+#define _Serialprint Serial.print //for standard use of the serial line
+#else
+#define _Serialprintf rdebugA //for debugging over the serial line
+#define _Serialprintln rdebugA //for debugging over the serial line
+#define _Serialprint rdebugA //for debugging over the serial line
 #include "RemoteDebug.h"  //https://github.com/JoaoLopesF/RemoteDebug
-#ifndef DEBUG_DISABLED // Only if debug is not disabled (for production/release)
-// RemoteDebug addon library: RemoteDebugger, an Simple software debugger - based on SerialDebug Library
+extern RemoteDebug Debug;
 #endif
 
 
