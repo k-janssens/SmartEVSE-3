@@ -80,25 +80,6 @@ static esp_adc_cal_characteristics_t * adc_chars_Temperature;
 
 struct ModBus MB;          // Used by SmartEVSE fuctions
 
-// Text
-const char StrFixed[]   = "Fixed";
-const char StrSocket[]  = "Socket";
-const char StrSmart[]   = "Smart";
-const char StrNormal[]  = "Normal";
-const char StrSolar[]   = "Solar";
-const char StrSolenoid[] = "Solenoid";
-const char StrMotor[]   = "Motor";
-const char StrDisabled[] = "Disabled";
-const char StrLoadBl[9][9]  = {"Disabled", "Master", "Node 1", "Node 2", "Node 3", "Node 4", "Node 5", "Node 6", "Node 7"};
-const char StrSwitch[5][10] = {"Disabled", "Access B", "Access S", "Sma-Sol B", "Sma-Sol S"};
-const char StrGrid[2][10] = {"4Wire", "3Wire"};
-const char StrEnabled[] = "Enabled";
-const char StrExitMenu[] = "MENU";
-const char StrMainsAll[] = "All"; 
-const char StrMainsHomeEVSE[] = "Home+EVSE";
-const char StrRFIDReader[6][10] = {"Disabled", "EnableAll", "EnableOne", "Learn", "Delete", "DeleteAll"};
-const char StrWiFi[3][10] = {"Disabled", "Enabled", "SetupWifi"};
-
 const char StrStateName[11][10] = {"A", "B", "C", "D", "COMM_B", "COMM_B_OK", "COMM_C", "COMM_C_OK", "Activate", "B1", "C1"};
 const char StrStateNameWeb[11][17] = {"Ready to Charge", "Connected to EV", "Charging", "D", "Request State B", "State B OK", "Request State C", "State C OK", "Activate", "Charging Stopped", "Stop Charging" };
 const char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
@@ -1398,111 +1379,6 @@ uint16_t getItemValue(uint8_t nav) {
 
         default:
             return 0;
-    }
-}
-
-/**
- * Get active option of an menu item
- *
- * @param uint8_t nav
- * @return uint8_t[] MenuItemOption
- */
-const char * getMenuItemOption(uint8_t nav) {
-    static char Str[12]; // must be declared static, since it's referenced outside of function scope
-    unsigned int value;
-
-    value = getItemValue(nav);
-
-    switch (nav) {
-        case MENU_3F:
-            return enable3f ? "Yes" : "No";
-        case MENU_CONFIG:
-            if (Config) return StrFixed;
-            else return StrSocket;
-        case MENU_MODE:
-            if (Mode == MODE_SMART) return StrSmart;
-            else if (Mode == MODE_SOLAR) return StrSolar;
-            else return StrNormal;
-        case MENU_START:
-                sprintf(Str, "-%2u A", value);
-                return Str;
-        case MENU_STOP:
-            if (value) {
-                sprintf(Str, "%2u min", value);
-                return Str;
-            } else return StrDisabled;
-        case MENU_LOADBL:
-            if (ExternalMaster && value == 1) return "Node 0";
-            else return StrLoadBl[LoadBl];
-        case MENU_MAINS:
-        case MENU_MIN:
-        case MENU_MAX:
-        case MENU_CIRCUIT:
-        case MENU_IMPORT:
-            sprintf(Str, "%2u A", value);
-            return Str;
-        case MENU_LOCK:
-            if (Lock == 1) return StrSolenoid;
-            else if (Lock == 2) return StrMotor;
-            else return StrDisabled;
-        case MENU_SWITCH:
-            return StrSwitch[Switch];
-        case MENU_RCMON:
-            if (RCmon) return StrEnabled;
-            else return StrDisabled;
-        case MENU_MAINSMETER:
-        case MENU_PVMETER:
-        case MENU_EVMETER:
-            return (const char*)EMConfig[value].Desc;
-        case MENU_GRID:
-            return StrGrid[Grid];
-        case MENU_MAINSMETERADDRESS:
-        case MENU_PVMETERADDRESS:
-        case MENU_EVMETERADDRESS:
-        case MENU_EMCUSTOM_UREGISTER:
-        case MENU_EMCUSTOM_IREGISTER:
-        case MENU_EMCUSTOM_PREGISTER:
-        case MENU_EMCUSTOM_EREGISTER:
-            if(value < 0x1000) sprintf(Str, "%u (%02X)", value, value);     // This just fits on the LCD.   
-            else sprintf(Str, "%u %X", value, value);
-            return Str;
-        case MENU_MAINSMETERMEASURE:
-            if (MainsMeterMeasure) return StrMainsHomeEVSE;
-            else return StrMainsAll;
-        case MENU_EMCUSTOM_ENDIANESS:
-            switch(value) {
-                case 0: return "LBF & LWF";
-                case 1: return "LBF & HWF";
-                case 2: return "HBF & LWF";
-                case 3: return "HBF & HWF";
-                default: return "";
-            }
-        case MENU_EMCUSTOM_DATATYPE:
-            switch (value) {
-                case MB_DATATYPE_INT16: return "INT16";
-                case MB_DATATYPE_INT32: return "INT32";
-                case MB_DATATYPE_FLOAT32: return "FLOAT32";
-            }
-        case MENU_EMCUSTOM_FUNCTION:
-            switch (value) {
-                case 3: return "3:Hold. Reg";
-                case 4: return "4:Input Reg";
-                default: return "";
-            }
-        case MENU_EMCUSTOM_UDIVISOR:
-        case MENU_EMCUSTOM_IDIVISOR:
-        case MENU_EMCUSTOM_PDIVISOR:
-        case MENU_EMCUSTOM_EDIVISOR:
-            sprintf(Str, "%lu", pow_10[value]);
-            return Str;
-        case MENU_RFIDREADER:
-            return StrRFIDReader[RFIDReader];
-        case MENU_WIFI:
-            return StrWiFi[WIFImode];    
-        case MENU_EXIT:
-            return StrExitMenu;
-        default:
-            return "";
     }
 }
 

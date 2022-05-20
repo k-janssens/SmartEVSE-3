@@ -427,6 +427,8 @@ extern uint8_t RFIDstatus;
 extern bool LocalTimeSet;
 
 extern uint8_t MenuItems[MENU_EXIT];
+extern boolean enable3f;
+extern uint8_t ExternalMaster;
 
 const struct {
     char Key[8];
@@ -523,7 +525,6 @@ void setAccess(bool Access);
 uint8_t getMenuItems(void);
 uint8_t setItemValue(uint8_t nav, uint16_t val);
 uint16_t getItemValue(uint8_t nav);
-const char * getMenuItemOption(uint8_t nav);
 void ConfigureModbusMode(uint8_t newmode);
 
 

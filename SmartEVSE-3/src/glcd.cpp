@@ -706,6 +706,131 @@ unsigned char GetPosInMenu (unsigned char count) {
 }
 
 
+/**
+ * Get active option of an menu item
+ *
+ * @param uint8_t nav
+ * @return uint8_t[] MenuItemOption
+ */
+const char * getMenuItemOption(uint8_t nav) {
+    static char Str[12]; // must be declared static, since it's referenced outside of function scope
+
+    // Text
+    const static char StrFixed[]   = "Fixed";
+    const static char StrSocket[]  = "Socket";
+    const static char StrSmart[]   = "Smart";
+    const static char StrNormal[]  = "Normal";
+    const static char StrSolar[]   = "Solar";
+    const static char StrSolenoid[] = "Solenoid";
+    const static char StrMotor[]   = "Motor";
+    const static char StrDisabled[] = "Disabled";
+    const static char StrLoadBl[9][9]  = {"Disabled", "Master", "Node 1", "Node 2", "Node 3", "Node 4", "Node 5", "Node 6", "Node 7"};
+    const static char StrSwitch[5][10] = {"Disabled", "Access B", "Access S", "Sma-Sol B", "Sma-Sol S"};
+    const static char StrGrid[2][10] = {"4Wire", "3Wire"};
+    const static char StrEnabled[] = "Enabled";
+    const static char StrExitMenu[] = "MENU";
+    const static char StrMainsAll[] = "All";
+    const static char StrMainsHomeEVSE[] = "Home+EVSE";
+    const static char StrRFIDReader[6][10] = {"Disabled", "EnableAll", "EnableOne", "Learn", "Delete", "DeleteAll"};
+    const static char StrWiFi[3][10] = {"Disabled", "Enabled", "SetupWifi"};
+
+		unsigned int value;
+
+    value = getItemValue(nav);
+
+    switch (nav) {
+        case MENU_3F:
+            return enable3f ? "Yes" : "No";
+        case MENU_CONFIG:
+            if (Config) return StrFixed;
+            else return StrSocket;
+        case MENU_MODE:
+            if (Mode == MODE_SMART) return StrSmart;
+            else if (Mode == MODE_SOLAR) return StrSolar;
+            else return StrNormal;
+        case MENU_START:
+                sprintf(Str, "-%2u A", value);
+                return Str;
+        case MENU_STOP:
+            if (value) {
+                sprintf(Str, "%2u min", value);
+                return Str;
+            } else return StrDisabled;
+        case MENU_LOADBL:
+            if (ExternalMaster && value == 1) return "Node 0";
+            else return StrLoadBl[LoadBl];
+        case MENU_MAINS:
+        case MENU_MIN:
+        case MENU_MAX:
+        case MENU_CIRCUIT:
+        case MENU_IMPORT:
+            sprintf(Str, "%2u A", value);
+            return Str;
+        case MENU_LOCK:
+            if (Lock == 1) return StrSolenoid;
+            else if (Lock == 2) return StrMotor;
+            else return StrDisabled;
+        case MENU_SWITCH:
+            return StrSwitch[Switch];
+        case MENU_RCMON:
+            if (RCmon) return StrEnabled;
+            else return StrDisabled;
+        case MENU_MAINSMETER:
+        case MENU_PVMETER:
+        case MENU_EVMETER:
+            return (const char*)EMConfig[value].Desc;
+        case MENU_GRID:
+            return StrGrid[Grid];
+        case MENU_MAINSMETERADDRESS:
+        case MENU_PVMETERADDRESS:
+        case MENU_EVMETERADDRESS:
+        case MENU_EMCUSTOM_UREGISTER:
+        case MENU_EMCUSTOM_IREGISTER:
+        case MENU_EMCUSTOM_PREGISTER:
+        case MENU_EMCUSTOM_EREGISTER:
+            if(value < 0x1000) sprintf(Str, "%u (%02X)", value, value);     // This just fits on the LCD.
+            else sprintf(Str, "%u %X", value, value);
+            return Str;
+        case MENU_MAINSMETERMEASURE:
+            if (MainsMeterMeasure) return StrMainsHomeEVSE;
+            else return StrMainsAll;
+        case MENU_EMCUSTOM_ENDIANESS:
+            switch(value) {
+                case 0: return "LBF & LWF";
+                case 1: return "LBF & HWF";
+                case 2: return "HBF & LWF";
+                case 3: return "HBF & HWF";
+                default: return "";
+            }
+        case MENU_EMCUSTOM_DATATYPE:
+            switch (value) {
+                case MB_DATATYPE_INT16: return "INT16";
+                case MB_DATATYPE_INT32: return "INT32";
+                case MB_DATATYPE_FLOAT32: return "FLOAT32";
+            }
+        case MENU_EMCUSTOM_FUNCTION:
+            switch (value) {
+                case 3: return "3:Hold. Reg";
+                case 4: return "4:Input Reg";
+                default: return "";
+            }
+        case MENU_EMCUSTOM_UDIVISOR:
+        case MENU_EMCUSTOM_IDIVISOR:
+        case MENU_EMCUSTOM_PDIVISOR:
+        case MENU_EMCUSTOM_EDIVISOR:
+            sprintf(Str, "%lu", pow_10[value]);
+            return Str;
+        case MENU_RFIDREADER:
+            return StrRFIDReader[RFIDReader];
+        case MENU_WIFI:
+            return StrWiFi[WIFImode];
+        case MENU_EXIT:
+            return StrExitMenu;
+        default:
+            return "";
+    }
+}
+
 
 
 
