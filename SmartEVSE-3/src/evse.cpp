@@ -1513,7 +1513,6 @@ const char * getMenuItemOption(uint8_t nav) {
  */
 void UpdateCurrentData(void) {
     uint8_t x;
-    //char Str[128];
 
     // reset Imeasured value (grid power used)
     Imeasured = 0;
@@ -1549,6 +1548,7 @@ void UpdateCurrentData(void) {
         }
 
 #ifdef LOG_DEBUG_EVSE
+        char Str[128];
         snprintf(Str, sizeof(Str) , "#STATE: %s Error: %u StartCurrent: -%i ChargeDelay: %u SolarStopTimer: %u NoCurrent: %u Imeasured: %.1f A IsetBalanced: %.1f A\n", getStateName(State), ErrorFlags, StartCurrent,
                                                                         ChargeDelay, SolarStopTimer,  NoCurrent,
                                                                         (float)Imeasured/10,
