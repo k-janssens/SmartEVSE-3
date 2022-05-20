@@ -522,7 +522,6 @@ void setSolarStopTimer(uint16_t Timer);
 void setState(uint8_t NewState, boolean forceState);
 void setState(uint8_t NewState);
 void setAccess(bool Access);
-uint8_t getMenuItems(void);
 uint8_t setItemValue(uint8_t nav, uint16_t val);
 uint16_t getItemValue(uint8_t nav);
 void ConfigureModbusMode(uint8_t newmode);
