@@ -1513,7 +1513,7 @@ const char * getMenuItemOption(uint8_t nav) {
  */
 void UpdateCurrentData(void) {
     uint8_t x;
-    char Str[128];
+    //char Str[128];
 
     // reset Imeasured value (grid power used)
     Imeasured = 0;
@@ -2068,7 +2068,7 @@ uint8_t PollEVNode = NR_EVSES;
 void Timer1S(void * parameter) {
 
     uint8_t Broadcast = 1;
-    uint8_t Timer5sec = 0;
+    //uint8_t Timer5sec = 0;
     uint8_t x;
 
 
