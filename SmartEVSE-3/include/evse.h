@@ -25,8 +25,13 @@
 
 #define __EVSE_MAIN
 
-//uncomment for production release, comment this to debug:
-#define DEBUG_DISABLED 1
+
+//for wifi-debugging, don't forget to set the debug levels LOG_EVSE_LOG and LOG_MODBUS_LOG before compiling
+//the wifi-debugger is available by telnetting to your SmartEVSE device
+//the on-screen instructions for verbose/warning/info/... do not apply, 
+//the debug messages that are compiled in are always shown for backwards compatibility reasons
+//uncomment for production release, comment this to debug via wifi:
+//#define DEBUG_DISABLED 1
 
 #ifndef VERSION
 #ifdef DEBUG_DISABLED
