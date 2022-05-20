@@ -692,6 +692,7 @@ uint8_t mapModbusRegister2ItemID() {
 /**
  * Read item values and send modbus response
  */
+/*
 void ReadItemValueResponse(void) {
     uint8_t ItemID;
     uint8_t i;
@@ -707,10 +708,12 @@ void ReadItemValueResponse(void) {
         ModbusException(MB.Address, MB.Function, MODBUS_EXCEPTION_ILLEGAL_DATA_ADDRESS);
     }
 }
+*/
 
 /**
  * Write item values and send modbus response
  */
+/*
 void WriteItemValueResponse(void) {
     uint8_t ItemID;
     uint8_t OK = 0;
@@ -732,10 +735,12 @@ void WriteItemValueResponse(void) {
         }
     }
 }
+*/
 
 /**
  * Write multiple item values and send modbus response
  */
+/*
 void WriteMultipleItemValueResponse(void) {
     uint8_t ItemID;
     uint16_t i, OK = 0, value;
@@ -760,3 +765,4 @@ void WriteMultipleItemValueResponse(void) {
         }
     }
 }
+*/

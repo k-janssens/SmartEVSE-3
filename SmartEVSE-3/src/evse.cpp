@@ -180,7 +180,6 @@ uint32_t serialnr = 0;
 uint8_t GridActive = 0;                                                     // When the CT's are used on Sensorbox2, it enables the GRID menu option.
 uint8_t CalActive = 0;                                                      // When the CT's are used on Sensorbox(1.5 or 2), it enables the CAL menu option.
 uint16_t Iuncal = 0;                                                        // Uncalibrated CT1 measurement (resolution 10mA)
-uint8_t LoadBlUnsaved = 0;
 
 uint16_t SolarStopTimer = 0;
 int32_t EnergyCharged = 0;                                                  // kWh meter value energy charged. (Wh) (will reset if state changes from A->B)
@@ -194,12 +193,11 @@ int32_t PV[3]={0, 0, 0};
 uint8_t ResetKwh = 2;                                                       // if set, reset EV kwh meter at state transition B->C
                                                                             // cleared when charging, reset to 1 when disconnected (state A)
 uint8_t ActivationMode = 0, ActivationTimer = 0;
-volatile uint16_t adcsample = 0, ppsample = 0;
+volatile uint16_t adcsample = 0;
 volatile uint16_t ADCsamples[25];                                           // declared volatile, as they are used in a ISR
 volatile uint8_t sampleidx = 0;
 volatile int adcchannel = ADC1_CHANNEL_3;
 char str[20];
-int avgsamples = 0;
 bool LocalTimeSet = false;
 
 int phasesLastUpdate = 0;

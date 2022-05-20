@@ -68,9 +68,9 @@ signed int receivePowerMeasurement(uint8_t *buf, uint8_t Meter);
 void requestCurrentMeasurement(uint8_t Meter, uint8_t Address);
 uint8_t receiveCurrentMeasurement(uint8_t *buf, uint8_t Meter, signed int *var);
 
-void ReadItemValueResponse(void);
-void WriteItemValueResponse(void);
-void WriteMultipleItemValueResponse(void);
+//void ReadItemValueResponse(void);
+//void WriteItemValueResponse(void);
+//void WriteMultipleItemValueResponse(void);
 
 
 #endif
