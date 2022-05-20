@@ -1712,6 +1712,26 @@ void EVSEStates(void * parameter) {
     } // while(1) loop
 }
 
+/**
+ * Send Energy measurement request over modbus
+ * 
+ * @param uint8_t Meter
+ * @param uint8_t Address
+ */
+void requestEnergyMeasurement(uint8_t Meter, uint8_t Address) {
+   switch (Meter) {
+        case EM_SOLAREDGE:
+            // Note:
+            // - SolarEdge uses 16-bit values, except for this measurement it uses 32bit int format
+            // - EM_SOLAREDGE should not be used for EV Energy Measurements
+            ModbusReadInputRequest(Address, EMConfig[Meter].Function, EMConfig[Meter].ERegister, 2);
+            break;
+        default:
+            requestMeasurement(Meter, Address, EMConfig[Meter].ERegister, 1);
+            break;
+    }
+}
+
 
 // Task that handles the Cable Lock and modbus
 // 
@@ -1802,7 +1822,7 @@ uint8_t PollEVNode = NR_EVSES;
                 case 5:                                                         // EV kWh meter, Power measurement (momentary power in Watt)
                     // Request Power if EV meter is configured
                     if (Node[PollEVNode].EVMeter) {
-                        requestPowerMeasurement(Node[PollEVNode].EVMeter, Node[PollEVNode].EVAddress);
+                        requestMeasurement(Node[PollEVNode].EVMeter, Node[PollEVNode].EVAddress,EMConfig[Node[PollEVNode].EVMeter].PRegister, 1);
                         break;
                     }
                     ModbusRequest++;
@@ -2042,6 +2062,53 @@ void Timer1S(void * parameter) {
 }
 
 
+/**
+ * Read energy measurement from modbus
+ * 
+ * @param pointer to buf
+ * @param uint8_t Meter
+ * @return signed int Energy (Wh)
+ */
+signed int receiveEnergyMeasurement(uint8_t *buf, uint8_t Meter) {
+    switch (Meter) {
+        case EM_SOLAREDGE:
+            // Note:
+            // - SolarEdge uses 16-bit values, except for this measurement it uses 32bit int format
+            // - EM_SOLAREDGE should not be used for EV Energy Measurements
+            return receiveMeasurement(buf, 0, EMConfig[Meter].Endianness, MB_DATATYPE_INT32, EMConfig[Meter].EDivisor - 3);
+        default:
+            return receiveMeasurement(buf, 0, EMConfig[Meter].Endianness, EMConfig[Meter].DataType, EMConfig[Meter].EDivisor - 3);
+    }
+}
+
+/**
+ * Read Power measurement from modbus
+ * 
+ * @param pointer to buf
+ * @param uint8_t Meter
+ * @return signed int Power (W)
+  */
+signed int receivePowerMeasurement(uint8_t *buf, uint8_t Meter) {
+    switch (Meter) {
+        case EM_SOLAREDGE:
+        {
+            // Note:
+            // - SolarEdge uses 16-bit values, with a extra 16-bit scaling factor
+            // - EM_SOLAREDGE should not be used for EV power measurements, only PV power measurements are supported
+            int scalingFactor = -(int)receiveMeasurement(
+                        buf,
+                        1,
+                        EMConfig[Meter].Endianness,
+                        EMConfig[Meter].DataType,
+                        0
+            );
+            return receiveMeasurement(buf, 0, EMConfig[Meter].Endianness, EMConfig[Meter].DataType, scalingFactor);
+        }
+        default:
+            return receiveMeasurement(buf, 0, EMConfig[Meter].Endianness, EMConfig[Meter].DataType, EMConfig[Meter].PDivisor);
+    }
+}
+
 
 // Modbus functions
 
@@ -2204,7 +2271,6 @@ ModbusMessage MBNodeRequest(ModbusMessage request) {
                 } else if (!OK) {
                     response.setError(MB.Address, MB.Function, ILLEGAL_DATA_VALUE);
                 } else  {
-                    //ModbusWriteMultipleResponse(MB.Address, MB.Register, OK);
                     response.add(MB.Address, MB.Function, (uint16_t)MB.Register, (uint16_t)OK);
                 }
             }
