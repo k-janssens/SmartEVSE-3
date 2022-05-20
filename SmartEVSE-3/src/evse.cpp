@@ -1899,6 +1899,7 @@ void EVSEStates(void * parameter) {
 
         // update LCD (every 1000ms) when not in the setup menu
         if (LCDupdate) {
+            // This is also the ideal place for debug messages that should not be printed every 10ms
             //_Serialprintf("States task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
             GLCD();
             LCDupdate = 0;
