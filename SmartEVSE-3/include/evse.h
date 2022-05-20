@@ -31,7 +31,7 @@
 //the on-screen instructions for verbose/warning/info/... do not apply, 
 //the debug messages that are compiled in are always shown for backwards compatibility reasons
 //uncomment for production release, comment this to debug via wifi:
-//#define DEBUG_DISABLED 1
+#define DEBUG_DISABLED 1
 
 #ifndef VERSION
 #ifdef DEBUG_DISABLED
