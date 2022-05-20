@@ -177,7 +177,7 @@ unsigned char GLCD_text_length2(const char *str) {
     unsigned char i = 0, length = 0;
 
     while (str[i]) {
-        length += font2[str[i]][0] + 2;
+        length += font2[(int) str[i]][0] + 2;
         i++;
     }
 

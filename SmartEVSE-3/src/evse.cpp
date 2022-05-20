@@ -142,6 +142,7 @@ int32_t Irms_EV[3]={0, 0, 0};                                               // M
 uint8_t State = STATE_A;
 uint8_t ErrorFlags = NO_ERROR;
 uint8_t NextState;
+uint8_t pilot;
 
 uint16_t MaxCapacity;                                                       // Cable limit (A) (limited by the wire in the charge cable, set automatically, or manually if Config=Fixed Cable)
 uint16_t ChargeCurrent;                                                     // Calculated Charge Current (Amps *10)
@@ -676,7 +677,7 @@ char IsCurrentAvailable(void) {
     for (n = 0; n < NR_EVSES; n++) if (BalancedState[n] == STATE_C)             // must be in STATE_C
     {
         ActiveEVSE++;                                                           // Count nr of active (charging) EVSE's
-        TotalCurrent += Balanced[n];                                            // Calculate total max charge current for all active EVSE's
+        TotalCurrent += Balanced[n];                                            // Calculate total of all set charge currents
     }
     if (ActiveEVSE == 0) {                                                      // No active (charging) EVSE's
         if (Imeasured > ((MaxMains - MinCurrent) * 10)) {                       // There should be at least 6A available
@@ -1693,7 +1694,7 @@ void CheckSwitch(void)
 void EVSEStates(void * parameter) {
 
   //uint8_t n;
-    uint8_t pilot, leftbutton = 5;
+    uint8_t leftbutton = 5;
     uint8_t DiodeCheck = 0; 
    
 
@@ -2944,11 +2945,8 @@ void StartwebServer(void) {
             errorId = 0;
         }
 
-        String evConnected = "true";
-        switch(State) {
-            case STATE_A:
-            case NOSTATE: evConnected = "false"; break;
-        }
+        String evConnected;
+        evConnected = (pilot == PILOT_12V) ? "false" : "true";                    //when access bit = 1, p.ex. in OFF mode, the STATEs are no longer updated
 
         DynamicJsonDocument doc(1024); // https://arduinojson.org/v6/assistant/
         doc["version"] = String(VERSION);
@@ -3054,7 +3052,7 @@ void StartwebServer(void) {
                     setMode(MODE_SMART);
                     break;
                 default:
-                    mode: "Value not allowed!";
+                    mode = "Value not allowed!";
             }
             doc["mode"] = mode;
         }
