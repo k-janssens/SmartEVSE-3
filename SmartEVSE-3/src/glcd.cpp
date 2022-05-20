@@ -115,6 +115,7 @@ void glcd_clrln(unsigned char ln, unsigned char data) {
     }
 }
 
+/*
 void glcd_clrln_buffer(unsigned char ln) {
     unsigned char i;
     if (ln > 7) return;
@@ -129,6 +130,7 @@ void glcd_clear(void) {
         glcd_clrln(i, 0);
     }
 }
+*/
 
 void GLCD_buffer_clr(void) {
     unsigned char x = 0;
