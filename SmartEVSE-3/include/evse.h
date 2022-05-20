@@ -358,12 +358,10 @@ extern portMUX_TYPE rtc_spinlock;   //TODO: Will be placed in the appropriate po
 #define RTC_EXIT_CRITICAL()     portEXIT_CRITICAL(&rtc_spinlock)
 
 
-extern IPAddress localIp;
 extern String APhostname;
 extern String APpassword;
 extern struct tm timeinfo;
 
-extern uint8_t GLCDbuf[512];                                                    // GLCD buffer (half of the display)
 
 extern uint16_t MaxMains;                                                       // Max Mains Amps (hard limit, limited by the MAINS connection)
 extern uint16_t MaxCurrent;                                                     // Max Charge current
@@ -377,9 +375,6 @@ extern uint8_t LoadBl;                                                          
 extern uint8_t Switch;                                                          // Allow access to EVSE with button on SW
 extern uint8_t RCmon;                                                           // Residual Current monitor
 extern uint8_t Grid;
-extern uint16_t StartCurrent;
-extern uint16_t StopTime;
-extern uint16_t ImportCurrent;
 extern uint8_t MainsMeter;                                                      // Type of Mains electric meter (0: Disabled / Constants EM_*)
 extern uint8_t MainsMeterAddress;
 extern uint8_t MainsMeterMeasure;                                               // What does Mains electric meter measure (0: Mains (Home+EVSE+PV) / 1: Home+EVSE / 2: Home)
@@ -397,8 +392,6 @@ extern uint8_t State;
 extern uint8_t ErrorFlags;
 extern uint8_t NextState;
 
-extern uint16_t MaxCapacity;                                                    // Cable limit (Amps)(limited by the wire in the charge cable, set automatically, or manually if Config=Fixed Cable)
-extern int16_t Imeasured;                                                       // Max of all CT inputs (Amps * 10) (23 = 2.3A)
 extern int16_t Isum;
 extern uint16_t Balanced[NR_EVSES];                                             // Amps value per EVSE
 

@@ -75,6 +75,7 @@ const unsigned char LCD_Flow [] = {
 bool LCDToggle = false;                                                         // Toggle display between two values
 unsigned char LCDText = 0;                                                      // Cycle through text messages
 unsigned int GLCDx, GLCDy;
+uint8_t GLCDbuf[512];                                                       // GLCD buffer (half of the display)
 
 void st7565_command(unsigned char data) {
     _A0_0;
@@ -423,7 +424,7 @@ void GLCD(void) {
             if (WIFImode == 1 ) {   // Wifi Enabled
 
                 if (WiFi.status() == WL_CONNECTED) {
-                    sprintf(Str, "%u.%u.%u.%u %i%cC",localIp[0],localIp[1],localIp[2],localIp[3],TempEVSE, 0x0C);
+                    sprintf(Str, "%u.%u.%u.%u %i%cC",WiFi.localIP()[0],WiFi.localIP()[1],WiFi.localIP()[2],WiFi.localIP()[3],TempEVSE, 0x0C);
                     GLCD_write_buf_str(0,0, Str, GLCD_ALIGN_LEFT);
                     if (LocalTimeSet) sprintf(Str, "%02u:%02u",timeinfo.tm_hour, timeinfo.tm_min);
                     else sprintf(Str, "--:--");

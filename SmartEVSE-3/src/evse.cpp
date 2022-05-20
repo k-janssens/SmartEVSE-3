@@ -85,7 +85,6 @@ const char StrStateNameWeb[11][17] = {"Ready to Charge", "Connected to EV", "Cha
 const char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
 
 // Global data
-uint8_t GLCDbuf[512];                                                       // GLCD buffer (half of the display)
 
 
 // The following data will be updated by eeprom/storage data at powerup:
@@ -496,16 +495,6 @@ const char * getStateNameWeb(uint8_t StateCode) {
 
 
 
-const char * getErrorNameWeb(uint8_t ErrorCode) {
-    uint8_t count = 0;
-    //find the error bit that is set
-    while (ErrorCode) {
-        count++;
-        ErrorCode = ErrorCode >> 1;
-    }    
-    if(count < 9) return StrErrorNameWeb[count];
-    else return "Multiple Errors";
-}
 
 uint8_t getErrorId(uint8_t ErrorCode) {
     uint8_t count = 0;
@@ -518,6 +507,13 @@ uint8_t getErrorId(uint8_t ErrorCode) {
 }
 
 
+const char * getErrorNameWeb(uint8_t ErrorCode) {
+    uint8_t count = 0;
+    const static char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
+    count = getErrorId(ErrorCode);
+    if(count < 9) return StrErrorNameWeb[count];
+    else return "Multiple Errors";
+}
 
 /**
  * Set EVSE mode
@@ -2633,6 +2629,7 @@ void write_settings(void) {
 }
 
 
+/*
 void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
     _Serialprint("WiFi lost connection.\n");
     // try to reconnect when not connected to AP
@@ -2641,10 +2638,12 @@ void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
         WiFi.begin();
     }
 }
+*/
 
 void WiFiStationGotIp(WiFiEvent_t event, WiFiEventInfo_t info) {
-    localIp = WiFi.localIP();
-    _Serialprintf("Connected to AP: %s\nLocal IP: %s\n", WiFi.SSID(), localIp);
+    Serial.print("Connected to AP: "); Serial.print(WiFi.SSID());
+    Serial.print("\nLocal IP: "); Serial.print(WiFi.localIP());
+    Serial.print("\n");
 }
 
 
@@ -3107,7 +3106,7 @@ void WiFiSetup(void) {
     WiFi.persistent(true);
         
     // On disconnect Event, call function
-    //WiFi.onEvent(WiFiStationDisconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);    
+    //WiFi.onEvent(WiFiStationDisconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
     // On IP, call function
     WiFi.onEvent(WiFiStationGotIp, ARDUINO_EVENT_WIFI_STA_GOT_IP);  // arduino 2.x
     //
