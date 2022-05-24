@@ -58,7 +58,6 @@ struct tm timeinfo;
 AsyncWebServer webServer(80);
 //AsyncWebSocket ws("/ws");           // data to/from webpage
 DNSServer dnsServer;
-IPAddress localIp;
 String APhostname = "SmartEVSE-" + String( MacId() & 0xffff, 10);           // SmartEVSE access point Name = SmartEVSE-xxxxx
 
 ESPAsync_WiFiManager ESPAsync_wifiManager(&webServer, &dnsServer, APhostname.c_str());
@@ -2641,9 +2640,7 @@ void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
 */
 
 void WiFiStationGotIp(WiFiEvent_t event, WiFiEventInfo_t info) {
-    Serial.print("Connected to AP: "); Serial.print(WiFi.SSID());
-    Serial.print("\nLocal IP: "); Serial.print(WiFi.localIP());
-    Serial.print("\n");
+    _Serialprintf("Connected to AP: %s\nLocal IP: %s\n", WiFi.SSID(), WiFi.localIP());
 }
 
 
@@ -3040,8 +3037,6 @@ void WiFiSetup(void) {
     ESPAsync_wifiManager.setAPStaticIPConfig(IPAddress(192,168,4,1), IPAddress(192,168,4,1), IPAddress(255,255,255,0));
 
     ESPAsync_wifiManager.setConfigPortalTimeout(120);   // Portal will be available 2 minutes to connect to, then close. (if connected within this time, it will remain active)
-
-    localIp = WiFi.localIP();
 
     // Start the mDNS responder so that the SmartEVSE can be accessed using a local hostame: http://SmartEVSE-xxxxxx.local
     if (!MDNS.begin(APhostname.c_str())) {                
