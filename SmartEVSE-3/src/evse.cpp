@@ -2448,7 +2448,7 @@ void CheckAPpassword(void) {
             APpassword[i] = c;
         }
     }
-    _Serialprintf("APpassword: %s",APpassword);
+    _Serialprintf("APpassword: %s",APpassword.c_str());
 }
 
 /**
@@ -2640,7 +2640,7 @@ void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
 */
 
 void WiFiStationGotIp(WiFiEvent_t event, WiFiEventInfo_t info) {
-    _Serialprintf("Connected to AP: %s\nLocal IP: %s\n", WiFi.SSID(), WiFi.localIP());
+    _Serialprintf("Connected to AP: %s\nLocal IP: %s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
 }
 
 
@@ -3042,7 +3042,7 @@ void WiFiSetup(void) {
     if (!MDNS.begin(APhostname.c_str())) {                
         _Serialprint("Error setting up MDNS responder!\n");
     } else {
-        _Serialprintf("mDNS responder started. http://%s.local\n",APhostname);
+        _Serialprintf("mDNS responder started. http://%s.local\n",APhostname.c_str());
     }
 
     WiFi.setAutoReconnect(true);

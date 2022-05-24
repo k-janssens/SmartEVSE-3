@@ -424,7 +424,7 @@ void GLCD(void) {
             if (WIFImode == 1 ) {   // Wifi Enabled
 
                 if (WiFi.status() == WL_CONNECTED) {
-                    sprintf(Str, "%u.%u.%u.%u %i%cC",WiFi.localIP()[0],WiFi.localIP()[1],WiFi.localIP()[2],WiFi.localIP()[3],TempEVSE, 0x0C);
+                    sprintf(Str, "%s %i%cC",WiFi.localIP().toString().c_str(), TempEVSE, 0x0C);
                     GLCD_write_buf_str(0,0, Str, GLCD_ALIGN_LEFT);
                     if (LocalTimeSet) sprintf(Str, "%02u:%02u",timeinfo.tm_hour, timeinfo.tm_min);
                     else sprintf(Str, "--:--");
