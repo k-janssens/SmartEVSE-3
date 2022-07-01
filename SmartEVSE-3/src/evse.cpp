@@ -1709,7 +1709,7 @@ void EVSEStates(void * parameter) {
 
 /**
  * Send Energy measurement request over modbus
- * 
+ *
  * @param uint8_t Meter
  * @param uint8_t Address
  */
@@ -2059,7 +2059,7 @@ void Timer1S(void * parameter) {
 
 /**
  * Read energy measurement from modbus
- * 
+ *
  * @param pointer to buf
  * @param uint8_t Meter
  * @return signed int Energy (Wh)
@@ -2078,7 +2078,7 @@ signed int receiveEnergyMeasurement(uint8_t *buf, uint8_t Meter) {
 
 /**
  * Read Power measurement from modbus
- * 
+ *
  * @param pointer to buf
  * @param uint8_t Meter
  * @return signed int Power (W)
