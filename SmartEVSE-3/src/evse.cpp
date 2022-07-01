@@ -2175,9 +2175,11 @@ void Timer1S(void * parameter) {
           
 
         // this will run every 5 seconds
-        // if (Timer5sec++ >= 5) {
-        //     // Connected to WiFi?
-        //     if (WiFi.status() == WL_CONNECTED) {
+        if (Timer5sec++ >= 5) {
+        //     // If not connected, force reconnect
+             if (WiFi.status() == !WL_CONNECTED) {
+               WiFi.disconnect();
+               WiFi.reconnect();
         //         ws.printfAll("T:%d",TempEVSE);                              // Send internal temperature to clients 
         //         ws.printfAll("S:%s",getStateNameWeb(State));
         //         ws.printfAll("E:%s",getErrorNameWeb(ErrorFlags));
@@ -2186,9 +2188,9 @@ void Timer1S(void * parameter) {
         //         ws.printfAll("R:%u", esp_reset_reason() );
 
         //         ws.cleanupClients();                                        // Cleanup old websocket clients
-        //     } 
-        //     Timer5sec = 0;
-        // }
+             } 
+             Timer5sec = 0;
+         }
 
         //Serial.printf("Task 1s free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
 
