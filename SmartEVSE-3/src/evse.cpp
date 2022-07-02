@@ -186,6 +186,10 @@ int32_t PowerMeasured = 0;                                                  // M
 uint8_t RFIDstatus = 0;
 uint8_t ExternalMaster = 0;
 int32_t EnergyEV = 0;   
+int32_t Mains_export_active_energy = 0;                                     // Mainsmeter exported active energy, only for API purposes so you can guard the 
+                                                                            // enery usage of your house
+int32_t Mains_import_active_energy = 0;                                     // Mainsmeter imported active energy, only for API purposes so you can guard the 
+                                                                            // enery usage of your house
 int32_t CM[3]={0, 0, 0};
 int32_t PV[3]={0, 0, 0};
 uint8_t ResetKwh = 2;                                                       // if set, reset EV kwh meter at state transition B->C
@@ -204,18 +208,18 @@ int homeBatteryCurrent = 0;
 int homeBatteryLastUpdate = 0; // Time in milliseconds
 
 struct EMstruct EMConfig[EM_CUSTOM + 1] = {
-    /* DESC,      ENDIANNESS,      FCT, DATATYPE,            U_REG,DIV, I_REG,DIV, P_REG,DIV, E_REG,DIV */
-    {"Disabled",  ENDIANESS_LBF_LWF, 0, MB_DATATYPE_INT32,        0, 0,      0, 0,      0, 0,      0, 0}, // First entry!
-    {"Sensorbox", ENDIANESS_HBF_HWF, 4, MB_DATATYPE_FLOAT32, 0xFFFF, 0,      0, 0, 0xFFFF, 0, 0xFFFF, 0}, // Sensorbox (Own routine for request/receive)
-    {"Phoenix C", ENDIANESS_HBF_LWF, 4, MB_DATATYPE_INT32,      0x0, 1,    0xC, 3,   0x28, 1,   0x3E, 1}, // PHOENIX CONTACT EEM-350-D-MCB (0,1V / mA / 0,1W / 0,1kWh) max read count 11
-    {"Finder",    ENDIANESS_HBF_HWF, 4, MB_DATATYPE_FLOAT32, 0x1000, 0, 0x100E, 0, 0x1026, 0, 0x1106, 3}, // Finder 7E.78.8.400.0212 (V / A / W / Wh) max read count 127
-    {"Eastron",   ENDIANESS_HBF_HWF, 4, MB_DATATYPE_FLOAT32,    0x0, 0,    0x6, 0,   0x34, 0,  0x156, 0}, // Eastron SDM630 (V / A / W / kWh) max read count 80
-    {"InvEastrn", ENDIANESS_HBF_HWF, 4, MB_DATATYPE_FLOAT32,    0x0, 0,    0x6, 0,   0x34, 0,  0x156, 0}, // Since Eastron SDM series are bidirectional, sometimes they are connected upsidedown, so positive current becomes negative etc.; Eastron SDM630 (V / A / W / kWh) max read count 80
-		{"ABB",       ENDIANESS_HBF_HWF, 3, MB_DATATYPE_INT32,   0x5B00, 1, 0x5B0C, 2, 0x5B14, 2, 0x5002, 2}, // ABB B23 212-100 (0.1V / 0.01A / 0.01W / 0.01kWh) RS485 wiring reversed / max read count 125
-    {"SolarEdge", ENDIANESS_HBF_HWF, 3, MB_DATATYPE_INT16,    40196, 0,  40191, 0,  40083, 0,  40226, 3}, // SolarEdge SunSpec (0.01V (16bit) / 0.1A (16bit) / 1W  (16bit) / 1 Wh (32bit))
-    {"WAGO",      ENDIANESS_HBF_HWF, 3, MB_DATATYPE_FLOAT32, 0x5002, 0, 0x500C, 0, 0x5012, 3, 0x6000, 0}, // WAGO 879-30x0 (V / A / kW / kWh)
-    {"API",       ENDIANESS_HBF_HWF, 3, MB_DATATYPE_FLOAT32, 0x5002, 0, 0x500C, 0, 0x5012, 3, 0x6000, 0}, // WAGO 879-30x0 (V / A / kW / kWh)
-    {"Custom",    ENDIANESS_LBF_LWF, 4, MB_DATATYPE_INT32,        0, 0,      0, 0,      0, 0,      0, 0}  // Last entry!
+    /* DESC,      ENDIANNESS,      FCT, DATATYPE,            U_REG,DIV, I_REG,DIV, P_REG,DIV, E_REG_IMP,DIV, E_REG_EXP, DIV */
+    {"Disabled",  ENDIANESS_LBF_LWF, 0, MB_DATATYPE_INT32,        0, 0,      0, 0,      0, 0,      0, 0,0     , 0}, // First entry!
+    {"Sensorbox", ENDIANESS_HBF_HWF, 4, MB_DATATYPE_FLOAT32, 0xFFFF, 0,      0, 0, 0xFFFF, 0, 0xFFFF, 0,0     , 0}, // Sensorbox (Own routine for request/receive)
+    {"Phoenix C", ENDIANESS_HBF_LWF, 4, MB_DATATYPE_INT32,      0x0, 1,    0xC, 3,   0x28, 1,   0x3E, 1,0     , 0}, // PHOENIX CONTACT EEM-350-D-MCB (0,1V / mA / 0,1W / 0,1kWh) max read count 11
+    {"Finder",    ENDIANESS_HBF_HWF, 4, MB_DATATYPE_FLOAT32, 0x1000, 0, 0x100E, 0, 0x1026, 0, 0x1106, 3,0x110E, 3}, // Finder 7E.78.8.400.0212 (V / A / W / Wh) max read count 127
+    {"Eastron",   ENDIANESS_HBF_HWF, 4, MB_DATATYPE_FLOAT32,    0x0, 0,    0x6, 0,   0x34, 0,  0x48 , 0,0x4A  , 0}, // Eastron SDM630 (V / A / W / kWh) max read count 80
+    {"InvEastrn", ENDIANESS_HBF_HWF, 4, MB_DATATYPE_FLOAT32,    0x0, 0,    0x6, 0,   0x34, 0,  0x48 , 0,0x4A  , 0}, // Since Eastron SDM series are bidirectional, sometimes they are connected upsidedown, so positive current becomes negative etc.; Eastron SDM630 (V / A / W / kWh) max read count 80
+    {"ABB",       ENDIANESS_HBF_HWF, 3, MB_DATATYPE_INT32,   0x5B00, 1, 0x5B0C, 2, 0x5B14, 2, 0x5000, 2,0x5004, 2}, // ABB B23 212-100 (0.1V / 0.01A / 0.01W / 0.01kWh) RS485 wiring reversed / max read count 125
+    {"SolarEdge", ENDIANESS_HBF_HWF, 3, MB_DATATYPE_INT16,    40196, 0,  40191, 0,  40083, 0,  40234, 3, 40226, 3}, // SolarEdge SunSpec (0.01V (16bit) / 0.1A (16bit) / 1W  (16bit) / 1 Wh (32bit))
+    {"WAGO",      ENDIANESS_HBF_HWF, 3, MB_DATATYPE_FLOAT32, 0x5002, 0, 0x500C, 0, 0x5012, 3, 0x600C, 0,0x6018, 0}, // WAGO 879-30x0 (V / A / kW / kWh)//TODO maar WAGO heeft ook totaal
+    {"API",       ENDIANESS_HBF_HWF, 3, MB_DATATYPE_FLOAT32, 0x5002, 0, 0x500C, 0, 0x5012, 3, 0x6000, 0,0x6018, 0}, // WAGO 879-30x0 (V / A / kW / kWh)
+    {"Custom",    ENDIANESS_LBF_LWF, 4, MB_DATATYPE_INT32,        0, 0,      0, 0,      0, 0,      0, 0,     0, 0}  // Last entry!
 };
 
 
@@ -1712,17 +1716,31 @@ void EVSEStates(void * parameter) {
  *
  * @param uint8_t Meter
  * @param uint8_t Address
+ * @param bool    Export (if exported energy is requested)
  */
-void requestEnergyMeasurement(uint8_t Meter, uint8_t Address) {
+void requestEnergyMeasurement(uint8_t Meter, uint8_t Address, bool Export) {
    switch (Meter) {
         case EM_SOLAREDGE:
             // Note:
             // - SolarEdge uses 16-bit values, except for this measurement it uses 32bit int format
             // - EM_SOLAREDGE should not be used for EV Energy Measurements
-            ModbusReadInputRequest(Address, EMConfig[Meter].Function, EMConfig[Meter].ERegister, 2);
+            if (Export) ModbusReadInputRequest(Address, EMConfig[Meter].Function, EMConfig[Meter].ERegister_Exp, 2);
+            else        ModbusReadInputRequest(Address, EMConfig[Meter].Function, EMConfig[Meter].ERegister, 2);
+            break;
+        case EM_FINDER:
+        case EM_ABB:
+        case EM_EASTRON:
+        case EM_WAGO:
+            if (Export) requestMeasurement(Meter, Address, EMConfig[Meter].ERegister_Exp, 1);
+            else        requestMeasurement(Meter, Address, EMConfig[Meter].ERegister, 1);
+            break;
+        case EM_EASTRON_INV:
+            if (Export) requestMeasurement(Meter, Address, EMConfig[Meter].ERegister, 1);
+            else        requestMeasurement(Meter, Address, EMConfig[Meter].ERegister_Exp, 1);
             break;
         default:
-            requestMeasurement(Meter, Address, EMConfig[Meter].ERegister, 1);
+            if (!Export) //refuse to do a request on exported energy if the meter doesnt support it
+                requestMeasurement(Meter, Address, EMConfig[Meter].ERegister, 1);
             break;
     }
 }
@@ -1734,7 +1752,7 @@ void requestEnergyMeasurement(uint8_t Meter, uint8_t Address) {
 //
 void Timer100ms(void * parameter) {
 
-unsigned int locktimer = 0, unlocktimer = 0;
+unsigned int locktimer = 0, unlocktimer = 0, energytimer = 0;
 uint8_t PollEVNode = NR_EVSES;
 
 
@@ -1810,7 +1828,7 @@ uint8_t PollEVNode = NR_EVSES;
 #ifdef LOG_INFO_MODBUS
                         _Serialprintf("ModbusRequest %u: Request Energy Node %u\n", ModbusRequest, PollEVNode);
 #endif
-                        requestEnergyMeasurement(Node[PollEVNode].EVMeter, Node[PollEVNode].EVAddress);
+                        requestEnergyMeasurement(Node[PollEVNode].EVMeter, Node[PollEVNode].EVAddress, 0);
                         break;
                     }
                     ModbusRequest++;
@@ -1852,6 +1870,27 @@ uint8_t PollEVNode = NR_EVSES;
 #endif
                         requestCurrentMeasurement(EVMeter, EVMeterAddress);
                         break;
+                    }
+                    ModbusRequest++;
+                case 21:
+                    // Request active energy if Mainsmeter is configured
+                    if (MainsMeter ) {
+                        energytimer++; //this ticks approx every second?!?
+                        if (energytimer == 30) {
+#ifdef LOG_INFO_MODBUS
+                            _Serialprintf("ModbusRequest %u: Request MainsMeter Import Active Energy Measurement\n", ModbusRequest);
+#endif
+                            requestEnergyMeasurement(MainsMeter, MainsMeterAddress, 0);
+                            break;
+                        }
+                        if (energytimer >= 60) {
+#ifdef LOG_INFO_MODBUS
+                            _Serialprintf("ModbusRequest %u: Request MainsMeter Export Active Energy Measurement\n", ModbusRequest);
+#endif
+                            requestEnergyMeasurement(MainsMeter, MainsMeterAddress, 1);
+                            energytimer = 0;
+                            break;
+                        }
                     }
                     ModbusRequest++;
                 default:
@@ -2172,25 +2211,41 @@ ModbusMessage MBMainsMeterResponse(ModbusMessage request) {
     ModbusDecode( (uint8_t*)request.data(), request.size());
 
     // process only Responses, as otherwise MB.Data is unitialized, and it will throw an exception
-    if (MB.Register == EMConfig[MainsMeter].IRegister && MB.Type == MODBUS_RESPONSE) {
+    if (MB.Type == MODBUS_RESPONSE) {
+        if (MB.Register == EMConfig[MainsMeter].IRegister) {
 
-    //_Serialprint("Mains Meter Response\n");
-        x = receiveCurrentMeasurement(MB.Data, MainsMeter, CM);
-        if (x && LoadBl <2) timeout = 10;                   // only reset timeout when data is ok, and Master/Disabled
+        //_Serialprint("Mains Meter Response\n");
+            x = receiveCurrentMeasurement(MB.Data, MainsMeter, CM);
+            if (x && LoadBl <2) timeout = 10;                   // only reset timeout when data is ok, and Master/Disabled
 
-        // Calculate Isum (for nodes and master)
+            // Calculate Isum (for nodes and master)
 
-        phasesLastUpdate=time(NULL);
-        Isum = 0; 
-        int batteryPerPhase = getBatteryCurrent() / 3; // Divide the battery current per phase to spread evenly
+            phasesLastUpdate=time(NULL);
+            Isum = 0;
+            int batteryPerPhase = getBatteryCurrent() / 3; // Divide the battery current per phase to spread evenly
 
-        for (x = 0; x < 3; x++) {
-            // Calculate difference of Mains and PV electric meter
-            if (PVMeter) CM[x] = CM[x] - PV[x];             // CurrentMeter and PV values are MILLI AMPERE
-            Irms[x] = (signed int)(CM[x] / 100);            // Convert to AMPERE * 10
-            IrmsOriginal[x] = Irms[x];
-            Irms[x] -= batteryPerPhase;           
-            Isum = Isum + Irms[x];                          
+            for (x = 0; x < 3; x++) {
+                // Calculate difference of Mains and PV electric meter
+                if (PVMeter) CM[x] = CM[x] - PV[x];             // CurrentMeter and PV values are MILLI AMPERE
+                Irms[x] = (signed int)(CM[x] / 100);            // Convert to AMPERE * 10
+                IrmsOriginal[x] = Irms[x];
+                Irms[x] -= batteryPerPhase;
+                Isum = Isum + Irms[x];
+            }
+        }
+        else if (MB.Register == EMConfig[MainsMeter].ERegister) {
+            //import active energy
+            if (MainsMeter == EM_EASTRON_INV)
+                Mains_export_active_energy = receiveEnergyMeasurement(MB.Data, MainsMeter);
+            else
+                Mains_import_active_energy = receiveEnergyMeasurement(MB.Data, MainsMeter);
+        }
+        else if (MB.Register == EMConfig[MainsMeter].ERegister_Exp) {
+            //export active energy
+            if (MainsMeter == EM_EASTRON_INV)
+                Mains_import_active_energy = receiveEnergyMeasurement(MB.Data, MainsMeter);
+            else
+                Mains_export_active_energy = receiveEnergyMeasurement(MB.Data, MainsMeter);
         }
     }
 
@@ -2855,6 +2910,10 @@ void StartwebServer(void) {
         doc["home_battery"]["current"] = homeBatteryCurrent;
         doc["home_battery"]["last_update"] = homeBatteryLastUpdate;
         
+        doc["ev_meter"]["EVMeter_import_active_energy"] = round(EnergyEV / 100)/10; //in kWh, precision 1 decimal
+        doc["mains_meter"]["MainsMeter_import_active_energy"] = round(Mains_import_active_energy / 100)/10; //in kWh, precision 1 decimal
+        doc["mains_meter"]["MainsMeter_export_active_energy"] = round(Mains_export_active_energy / 100)/10; //in kWh, precision 1 decimal
+
         doc["phase_currents"]["TOTAL"] = Irms[0] + Irms[1] + Irms[2];
         doc["phase_currents"]["L1"] = Irms[0];
         doc["phase_currents"]["L2"] = Irms[1];
