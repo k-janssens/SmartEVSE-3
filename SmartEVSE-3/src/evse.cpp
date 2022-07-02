@@ -155,7 +155,7 @@ uint8_t UnlockCable = 0, LockCable = 0;
 uint8_t timeout = 5;                                                        // communication timeout (sec)
 uint16_t BacklightTimer = 0;                                                // Backlight timer (sec)
 uint8_t BacklightSet = 0;
-uint32_t ChargeTimer = 0;                                                   // Counts seconds in STATE C (Charging) (unused)
+//uint32_t ChargeTimer = 0;                                                   // Counts seconds in STATE C (Charging) (unused)
 uint8_t LCDTimer = 0;
 uint8_t AccessTimer = 0;
 int8_t TempEVSE = 0;                                                        // Temperature EVSE in deg C (-50 to +125)
@@ -1919,7 +1919,7 @@ void Timer1S(void * parameter) {
                 _Serialprintf("State C1 timeout!\n");
                 setState(STATE_B1);                                         // switch back to STATE_B1
                 GLCD_init();                                                // Re-init LCD (200ms delay)
-                ChargeTimer = 15;
+                //ChargeTimer = 15;
             }
         }
 
@@ -2819,7 +2819,7 @@ void StartwebServer(void) {
         doc["evse"]["connected"] = evConnected;
         doc["evse"]["access"] = Access_bit == 1;
         doc["evse"]["mode"] = Mode;
-        doc["evse"]["charge_timer"] = ChargeTimer;
+        //doc["evse"]["charge_timer"] = ChargeTimer;
         doc["evse"]["solar_stop_timer"] = SolarStopTimer;
         doc["evse"]["state"] = evstate;
         doc["evse"]["state_id"] = State;
