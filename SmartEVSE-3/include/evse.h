@@ -37,7 +37,10 @@
 #ifdef DEBUG_DISABLED
 #define VERSION "v3serkri-0.00"
 #else
-#define VERSION "v3serkri-0.00-debug"
+//please note that this version will only be displayed with the correct time/date if the program is recompiled
+//so the webserver will show correct version if evse.cpp is recompiled
+//the lcd display will show correct version if glcd.cpp is recompiled
+#define VERSION (__TIME__ " @" __DATE__)
 #endif
 #endif
 
