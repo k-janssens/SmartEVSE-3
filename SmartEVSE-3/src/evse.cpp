@@ -3090,11 +3090,13 @@ void onWifiEvent(WiFiEvent_t event) {
             _Serialprint("Connected or reconnected to WiFi\n");
             break;
         case WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-            _Serialprint("WiFi Disconnected. Reconnecting...\n");
-            //WiFi.setAutoReconnect(true); //I know this is very counter-intuitive, you would expect this line in WiFiSetup but this is according to docs
-                                           //look at: https://github.com/alanswx/ESPAsyncWiFiManager/issues/92
-                                           //but somehow it doesnt work reliably, depending on how the disconnect happened...
-            WiFi.reconnect();              //this works better!
+            if (WIFImode == 1) {
+                _Serialprint("WiFi Disconnected. Reconnecting...\n");
+                //WiFi.setAutoReconnect(true);  //I know this is very counter-intuitive, you would expect this line in WiFiSetup but this is according to docs
+                                                //look at: https://github.com/alanswx/ESPAsyncWiFiManager/issues/92
+                                                //but somehow it doesnt work reliably, depending on how the disconnect happened...
+                WiFi.reconnect();               //this works better!
+            }
             break;
         default: break;
   }
