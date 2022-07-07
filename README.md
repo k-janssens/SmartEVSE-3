@@ -85,7 +85,3 @@ Have an idea for the API? Edit it here <a href="https://swagger-editor.serkri.be
 
 If you are not using the webserver /update endpoint:
 * Upload via USB configured in platformio.ini: platformio run --target upload
-
-# Known bugs
-
-* Wifi does not (always?) reconnect after losing connection; disabling and re-enabling wifi re-establishes connection. There seems to be an extremely hard to find bug in the ESPAsyncWiFiManager that causes this.
