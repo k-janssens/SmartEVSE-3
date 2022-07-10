@@ -49,6 +49,12 @@ extern struct ModBus MB;
 void ModbusSend8(uint8_t address, uint8_t function, uint16_t reg, uint16_t data) {
     // 0x12345678 is a token to keep track of modbus requests/responses. currently unused.
     MBclient.addRequest(0x12345678, address, function, reg, data);
+#ifdef LOG_INFO_MODBUS
+    _Serialprint("Sent packet");
+#endif
+#ifdef LOG_DEBUG_MODBUS
+    _Serialprintf("address: %02x, function: %02x, reg: %04x, data: %04x.\n", address, function, reg, data);
+#endif
 }
 
 /**
@@ -171,6 +177,19 @@ void ModbusWriteMultipleRequest(uint8_t address, uint16_t reg, uint16_t *values,
     MB.RequestRegister = reg;
     // 0x12345678 is a token to keep track of modbus requests/responses. currently unused.
     MBclient.addRequest(0x12345678, address, 0x10, reg, (uint16_t) count, count * 2u, values);
+#ifdef LOG_INFO_MODBUS
+    _Serialprint("Sent packet");
+#endif
+#ifdef LOG_DEBUG_MODBUS
+    uint16_t i;
+    char Str[MODBUS_SYS_CONFIG_COUNT * 5 + 10];
+    char *cur = Str, * const end = Str + sizeof Str;
+    for (i = 0; i < MODBUS_SYS_CONFIG_COUNT; i++) {
+        if (cur < end) cur += snprintf(cur, end-cur, "%04x ", values[i]);
+        else strcpy(end-sizeof("**truncated**"), "**truncated**");
+    }
+    _Serialprintf("address: %02x, function: 0x10, reg: %04x, count: %u, values: %s.\n", address, reg, count, Str);
+#endif
 }
 
 /**
