@@ -33,6 +33,9 @@
 //uncomment for production release, comment this to debug via wifi:
 #define DEBUG_DISABLED 1
 
+//uncomment this to emulate an rfid reader with rfid of card = 123456
+//#define FAKE_RFID 1
+
 #ifndef VERSION
 #ifdef DEBUG_DISABLED
 #define VERSION "v3serkri-0.00"
@@ -386,6 +389,9 @@ extern uint8_t PVMeterAddress;
 extern uint8_t EVMeter;                                                         // Type of EV electric meter (0: Disabled / Constants EM_*)
 extern uint8_t EVMeterAddress;
 extern uint8_t RFIDReader;
+#ifdef FAKE_RFID
+extern uint8_t Show_RFID;
+#endif
 extern uint8_t WIFImode;
 
 extern int32_t Irms[3];                                                         // Momentary current per Phase (Amps *10) (23 = 2.3A)
