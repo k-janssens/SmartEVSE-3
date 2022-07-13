@@ -34,6 +34,8 @@
 #define DEBUG_DISABLED 1
 
 //uncomment this to emulate an rfid reader with rfid of card = 123456
+//showing the rfid card is simulated by executing http://smartevse-xxx.lan/debug?showrfid=1
+//don't forget to first store the card before it can activate charging
 //#define FAKE_RFID 1
 
 #ifndef VERSION
