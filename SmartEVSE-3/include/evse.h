@@ -31,7 +31,7 @@
 //the on-screen instructions for verbose/warning/info/... do not apply, 
 //the debug messages that are compiled in are always shown for backwards compatibility reasons
 //uncomment for production release, comment this to debug via wifi:
-//#define DEBUG_DISABLED 1
+#define DEBUG_DISABLED 1
 
 #ifndef VERSION
 #ifdef DEBUG_DISABLED
@@ -48,7 +48,7 @@
 #define LOG_OFF 0
 
 #define LOG_EVSE LOG_INFO                                                       // Default: LOG_INFO
-#define LOG_MODBUS LOG_DEBUG                                                     // Default: LOG_WARN
+#define LOG_MODBUS LOG_WARN                                                     // Default: LOG_WARN
 
 
 #ifdef DEBUG_DISABLED
