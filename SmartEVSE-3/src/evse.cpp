@@ -1862,6 +1862,7 @@ uint8_t PollEVNode = NR_EVSES;
                         processAllNodeStates(ModbusRequest - 13u);
                         break;
                     }
+                    ModbusRequest = 21;
                 case 20:                                                         // EV kWh meter, Current measurement
                     // Request Current if EV meter is configured
                     if (EVMeter) {
