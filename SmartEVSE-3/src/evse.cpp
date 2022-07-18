@@ -97,6 +97,7 @@ uint16_t MaxCircuit = MAX_CIRCUIT;                                          // M
 uint8_t Config = CONFIG;                                                    // Configuration (0:Socket / 1:Fixed Cable)
 uint8_t LoadBl = LOADBL;                                                    // Load Balance Setting (0:Disable / 1:Master / 2-8:Node)
 uint8_t Switch = SWITCH;                                                    // External Switch (0:Disable / 1:Access B / 2:Access S / 3:Smart-Solar B / 4:Smart-Solar S)
+                                                                            // B=momentary push button, S=toggle switch
 uint8_t RCmon = RC_MON;                                                     // Residual Current Monitor (0:Disable / 1:Enable)
 uint16_t StartCurrent = START_CURRENT;
 uint16_t StopTime = STOP_TIME;
@@ -110,6 +111,9 @@ uint8_t Grid = GRID;                                                        // T
 uint8_t EVMeter = EV_METER;                                                 // Type of EV electric meter (0: Disabled / Constants EM_*)
 uint8_t EVMeterAddress = EV_METER_ADDRESS;
 uint8_t RFIDReader = RFID_READER;                                           // RFID Reader (0:Disabled / 1:Enabled / 2:Enable One / 3:Learn / 4:Delete / 5:Delete All)
+#ifdef FAKE_RFID
+uint8_t Show_RFID = 0;
+#endif
 uint8_t WIFImode = WIFI_MODE;                                               // WiFi Mode (0:Disabled / 1:Enabled / 2:Start Portal)
 String APpassword = "00000000";
 
@@ -2829,7 +2833,7 @@ void StartwebServer(void) {
 
         if (RFIDReader) {
             switch(RFIDstatus) {
-                case 0:
+                case 0: doc["evse"]["rfid"] = "Ready to read card"; break;
                 case 1: doc["evse"]["rfid"] = "Present"; break;
                 case 2: doc["evse"]["rfid"] = "Card Stored"; break;
                 case 3: doc["evse"]["rfid"] = "Card Deleted"; break;
@@ -3061,6 +3065,17 @@ void StartwebServer(void) {
 
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
     });
+
+#ifdef FAKE_RFID
+    //this can be activated by: http://smartevse-xxx.lan/debug?showrfid=1
+    webServer.on("/debug", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if(request->hasParam("showrfid")) {
+            Show_RFID = strtol(request->getParam("showrfid")->value().c_str(),NULL,0);
+        }
+        _Serialprintf("DEBUG: Show_RFID=%u.\n",Show_RFID);
+        request->send(200, "text/html", "Finished request");
+    });
+#endif
 
     // attach filesystem root at URL /
     webServer.serveStatic("/", SPIFFS, "/");
