@@ -399,7 +399,6 @@ extern int16_t Isum;
 extern uint16_t Balanced[NR_EVSES];                                             // Amps value per EVSE
 
 extern uint8_t menu;
-extern uint32_t ChargeTimer;                                                    // seconds counter
 extern uint8_t LCDTimer;
 extern uint16_t BacklightTimer;                                                 // remaining seconds the LCD backlight is active
 extern int8_t TempEVSE;                                                         // Temperature EVSE in deg C (-40 - +125)
