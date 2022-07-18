@@ -1341,7 +1341,7 @@ void UpdateCurrentData(void) {
         }
 
 #ifdef LOG_DEBUG_EVSE
-        char Str[128];
+        char Str[140];
         snprintf(Str, sizeof(Str) , "#STATE: %s Error: %u StartCurrent: -%i ChargeDelay: %u SolarStopTimer: %u NoCurrent: %u Imeasured: %.1f A IsetBalanced: %.1f A\n", getStateName(State), ErrorFlags, StartCurrent,
                                                                         ChargeDelay, SolarStopTimer,  NoCurrent,
                                                                         (float)Imeasured/10,
