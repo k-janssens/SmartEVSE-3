@@ -1774,7 +1774,6 @@ uint8_t PollEVNode = NR_EVSES;
 
         // Every 2 seconds, request measurements from modbus meters
         if (ModbusRequest) {
-
             switch (ModbusRequest++) {                                          // State
                 case 1:                                                         // PV kwh meter
                     if (PVMeter) {
@@ -1844,6 +1843,7 @@ uint8_t PollEVNode = NR_EVSES;
                         processAllNodeStates(ModbusRequest - 13u);
                         break;
                     }
+                    ModbusRequest = 21;
                 case 20:                                                         // EV kWh meter, Current measurement
                     // Request Current if EV meter is configured
                     if (EVMeter) {
@@ -1866,7 +1866,7 @@ uint8_t PollEVNode = NR_EVSES;
                     ModbusRequest = 0;
                     //_Serialprintf("Task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
                     break;
-            }
+            } //switch
         }
 
 
