@@ -512,8 +512,10 @@ struct EMstruct {
     uint8_t IDivisor;       // 10^x
     uint16_t PRegister;     // Total power (W) -- only used for EV/PV meter momentary power
     uint8_t PDivisor;       // 10^x
-    uint16_t ERegister;     // Total energy (kWh)
+    uint16_t ERegister;     // Total imported energy (kWh); equals total energy if meter doesnt support exported energy
     uint8_t EDivisor;       // 10^x
+    uint16_t ERegister_Exp; // Total exported energy (kWh)
+    uint8_t EDivisor_Exp;   // 10^x
 };
 
 extern struct EMstruct EMConfig[EM_CUSTOM + 1];
