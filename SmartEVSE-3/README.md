@@ -5,3 +5,4 @@ pio run -t buildfs
 
 Create Release:
 git tag v1.m.p-serkri-v3
+git push --tags
