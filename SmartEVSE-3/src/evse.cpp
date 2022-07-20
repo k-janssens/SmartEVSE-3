@@ -2108,7 +2108,6 @@ void Timer1S(void * parameter) {
             }
         } else AccessTimer = 0;                                             // Not in state A, then disable timer
 
-
         if ((TempEVSE < (maxTemp - 10)) && (ErrorFlags & TEMP_HIGH)) {                  // Temperature below limit?
             ErrorFlags &= ~TEMP_HIGH; // clear Error
         }
