@@ -2872,8 +2872,7 @@ void StartwebServer(void) {
             errorId = 0;
         }
 
-        String evConnected;
-        evConnected = (pilot == PILOT_12V) ? "false" : "true";                    //when access bit = 1, p.ex. in OFF mode, the STATEs are no longer updated
+        boolean evConnected = pilot != PILOT_12V;                    //when access bit = 1, p.ex. in OFF mode, the STATEs are no longer updated
 
         DynamicJsonDocument doc(1024); // https://arduinojson.org/v6/assistant/
         doc["version"] = String(VERSION);
@@ -2923,7 +2922,7 @@ void StartwebServer(void) {
 
         doc["ev_meter"]["description"] = EMConfig[EVMeter].Desc;
         doc["ev_meter"]["address"] = EVMeterAddress;
-        doc["ev_meter"]["power"] = round(PowerMeasured / 100)/10; //in kWh, precision 1 decimal
+        doc["ev_meter"]["import_active_energy"] = round(PowerMeasured / 100)/10; //in kW, precision 1 decimal
         doc["ev_meter"]["total_kwh"] = round(EnergyEV / 100)/10; //in kWh, precision 1 decimal
         doc["ev_meter"]["charged_kwh"] = round(EnergyCharged / 100)/10; //in kWh, precision 1 decimal
 
