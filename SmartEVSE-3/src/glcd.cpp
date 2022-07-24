@@ -740,6 +740,9 @@ const char * getMenuItemOption(uint8_t nav) {
     value = getItemValue(nav);
 
     switch (nav) {
+        case MENU_MAX_TEMP:
+            sprintf(Str, "%2u C", maxTemp);
+            return Str;
         case MENU_3F:
             return enable3f ? "Yes" : "No";
         case MENU_CONFIG:
@@ -853,6 +856,7 @@ uint8_t getMenuItems (void) {
         MenuItems[m++] = MENU_IMPORT;                                           // - Import Current from Grid (A)
     }
     MenuItems[m++] = MENU_3F;
+    MenuItems[m++] = MENU_MAX_TEMP;
     MenuItems[m++] = MENU_LOADBL;                                               // Load Balance Setting (0:Disable / 1:Master / 2-8:Node)
     if (Mode && LoadBl < 2) {                                                   // ? Mode Smart/Solar and Load Balancing Disabled/Master?
         MenuItems[m++] = MENU_MAINS;                                            // - Max Mains Amps (hard limit, limited by the MAINS connection) (A) (Mode:Smart/Solar)

@@ -118,6 +118,7 @@ uint8_t WIFImode = WIFI_MODE;                                               // W
 String APpassword = "00000000";
 
 boolean enable3f = USE_3PHASES;
+uint16_t maxTemp = MAX_TEMPERATURE;
 
 int32_t Irms[3]={0, 0, 0};                                                  // Momentary current per Phase (23 = 2.3A) (resolution 100mA)
 int32_t Irms_EV[3]={0, 0, 0};                                               // Momentary current per Phase (23 = 2.3A) (resolution 100mA)
@@ -189,9 +190,9 @@ int32_t PowerMeasured = 0;                                                  // M
 uint8_t RFIDstatus = 0;
 uint8_t ExternalMaster = 0;
 int32_t EnergyEV = 0;   
-int32_t Mains_export_active_energy = 0;                                     // Mainsmeter exported active energy, only for API purposes so you can guard the 
+int32_t Mains_export_active_energy = 0;                                     // Mainsmeter exported active energy, only for API purposes so you can guard the
                                                                             // enery usage of your house
-int32_t Mains_import_active_energy = 0;                                     // Mainsmeter imported active energy, only for API purposes so you can guard the 
+int32_t Mains_import_active_energy = 0;                                     // Mainsmeter imported active energy, only for API purposes so you can guard the
                                                                             // enery usage of your house
 int32_t CM[3]={0, 0, 0};
 int32_t PV[3]={0, 0, 0};
@@ -1031,7 +1032,6 @@ void processAllNodeStates(uint8_t NodeNr) {
 }
 
 
-
 /**
  * Check minimum and maximum of a value and set the variable
  *
@@ -1045,6 +1045,9 @@ uint8_t setItemValue(uint8_t nav, uint16_t val) {
     }
 
     switch (nav) {
+        case MENU_MAX_TEMP:
+            maxTemp = val;
+            break;
         case MENU_3F:
             enable3f = val == 1;
             break;
@@ -1206,6 +1209,8 @@ uint8_t setItemValue(uint8_t nav, uint16_t val) {
  */
 uint16_t getItemValue(uint8_t nav) {
     switch (nav) {
+        case MENU_MAX_TEMP:
+            return maxTemp;
         case MENU_3F:
             return enable3f;
         case MENU_CONFIG:
@@ -1306,7 +1311,6 @@ uint16_t getItemValue(uint8_t nav) {
             return 0;
     }
 }
-
 
 
 /**
@@ -1996,8 +2000,7 @@ void Timer1S(void * parameter) {
             }
         } else AccessTimer = 0;                                             // Not in state A, then disable timer
 
-
-        if ((TempEVSE < 55) && (ErrorFlags & TEMP_HIGH)) {                  // Temperature below limit?
+        if ((TempEVSE < (maxTemp - 10)) && (ErrorFlags & TEMP_HIGH)) {                  // Temperature below limit?
             ErrorFlags &= ~TEMP_HIGH; // clear Error
         }
 
@@ -2031,7 +2034,7 @@ void Timer1S(void * parameter) {
             ResetBalancedStates();
         } else if (timeout) timeout--;
 
-        if (TempEVSE >= 65 && !(ErrorFlags & TEMP_HIGH))                         // Temperature too High?
+        if (TempEVSE > maxTemp && !(ErrorFlags & TEMP_HIGH))                         // Temperature too High?
         {
             ErrorFlags |= TEMP_HIGH;
             setState(STATE_A);                                              // ERROR, switch back to STATE_A
@@ -2609,7 +2612,8 @@ void read_settings(bool write) {
         APpassword = preferences.getString("APpassword",AP_PASSWORD);
 
         enable3f = preferences.getUChar("enable3f", false); 
-        
+        maxTemp = preferences.getUShort("maxTemp", MAX_TEMPERATURE);
+
         preferences.end();                                  
 
         if (write) write_settings();
@@ -2662,6 +2666,7 @@ void write_settings(void) {
     preferences.putString("APpassword", APpassword);
 
     preferences.putBool("enable3f", enable3f);
+    preferences.putUShort("maxTemp", maxTemp);
 
     preferences.end();
 
@@ -2877,6 +2882,7 @@ void StartwebServer(void) {
         doc["car_connected"] = evConnected;
         
         doc["evse"]["temp"] = TempEVSE;
+        doc["evse"]["temp_max"] = maxTemp;
         doc["evse"]["connected"] = evConnected;
         doc["evse"]["access"] = Access_bit == 1;
         doc["evse"]["mode"] = Mode;
@@ -2914,10 +2920,15 @@ void StartwebServer(void) {
         
         doc["home_battery"]["current"] = homeBatteryCurrent;
         doc["home_battery"]["last_update"] = homeBatteryLastUpdate;
-        
-        doc["ev_meter"]["EVMeter_import_active_energy"] = round(EnergyEV / 100)/10; //in kWh, precision 1 decimal
-        doc["mains_meter"]["MainsMeter_import_active_energy"] = round(Mains_import_active_energy / 100)/10; //in kWh, precision 1 decimal
-        doc["mains_meter"]["MainsMeter_export_active_energy"] = round(Mains_export_active_energy / 100)/10; //in kWh, precision 1 decimal
+
+        doc["ev_meter"]["description"] = EMConfig[EVMeter].Desc;
+        doc["ev_meter"]["address"] = EVMeterAddress;
+        doc["ev_meter"]["power"] = round(PowerMeasured / 100)/10; //in kWh, precision 1 decimal
+        doc["ev_meter"]["total_kwh"] = round(EnergyEV / 100)/10; //in kWh, precision 1 decimal
+        doc["ev_meter"]["charged_kwh"] = round(EnergyCharged / 100)/10; //in kWh, precision 1 decimal
+
+        doc["mains_meter"]["import_active_energy"] = round(Mains_import_active_energy / 100)/10; //in kWh, precision 1 decimal
+        doc["mains_meter"]["export_active_energy"] = round(Mains_export_active_energy / 100)/10; //in kWh, precision 1 decimal
 
         doc["phase_currents"]["TOTAL"] = Irms[0] + Irms[1] + Irms[2];
         doc["phase_currents"]["L1"] = Irms[0];
