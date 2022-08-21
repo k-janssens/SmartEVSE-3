@@ -443,7 +443,14 @@ void ProximityPin() {
 
     voltage = esp_adc_cal_raw_to_voltage(sample, adc_chars_PP);
 
-    _Serialprintf("PP pin: %u (%u mV)\n", sample, voltage);
+    if (!Config) {                                                          // Configuration (0:Socket / 1:Fixed Cable)
+        //socket
+        _Serialprintf("PP pin: %u (%u mV)\n", sample, voltage);
+    } else {
+        //fixed cable
+        _Serialprintf("PP pin: %u (%u mV) (warning: fixed cable configured so PP probably disconnected, making this reading void)\n", sample, voltage);
+    }
+
     MaxCapacity = 13;                                                       // No resistor, Max cable current = 13A
     if ((voltage > 1200) && (voltage < 1400)) MaxCapacity = 16;             // Max cable current = 16A	680R -> should be around 1.3V
     if ((voltage > 500) && (voltage < 700)) MaxCapacity = 32;               // Max cable current = 32A	220R -> should be around 0.6V
