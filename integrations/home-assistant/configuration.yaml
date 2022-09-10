@@ -1,8 +1,9 @@
 #lines to integrate SmartEVSE with HASS through native rest-API; no NodeRed or MQTT needed.
+#adapt line 6 to the url or ip-address of your SmartEVSE 
 
 sensor:
   - platform: rest
-    resource: http://SmartEVSE-51446.lan/settings
+    resource: http://SmartEVSE-xxxxx.lan/settings
     name: smartevse
     scan_interval: 300
     timeout: 20
