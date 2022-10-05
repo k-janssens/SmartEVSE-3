@@ -24,12 +24,12 @@
       let endpoint = document.location + 'settings';
       // let endpoint = 'http://10.0.0.36/settings';
       let initiated=false;
+      let mqttEditMode = false;
 
       $(document).ready(loadData());
 
-
       function loadData(){
-        $.ajax({
+          $.ajax({
               url: endpoint
           }).then(function(data) {
             if(!initiated) {
@@ -115,9 +115,9 @@
             }
 
             if(data.home_battery.last_update == 0) {
-              $('[id=with_homebattery]').hide();
+              $('.with_homebattery').hide();
             } else {
-              $('[id=with_homebattery]').show();
+              $('.with_homebattery').show();
             }
 
             if(data.home_battery.current == 0) {
@@ -135,6 +135,14 @@
             $('#evmeter_description').text(data.ev_meter.description);
             $('#evmeter_total_kwh').text(data.ev_meter.total_kwh.toFixed(1) + "kWh");
             $('#evmeter_charged_kwh').text(data.ev_meter.charged_kwh.toFixed(1) + "kWh");
+
+            if (!mqttEditMode) {
+                $('#mqtt_broker_ip').val(data.settings.mqtt_broker_ip);
+                $('#mqtt_broker_port').val(data.settings.mqtt_broker_port);
+                $('#mqtt_user').val(data.settings.mqtt_user);
+                $('#mqtt_password').val(data.settings.mqtt_password);
+                $('#mqtt_topic_prefix').val(data.settings.mqtt_topic_prefix);
+            }
 
             setTimeout("loadData()", 5000);
           });
@@ -367,7 +375,7 @@
                     </div>
                 </div>
 
-                <div class="col-xl-3 col-md-6 mb-4" id="with_homebattery">
+                <div class="col-xl-3 col-md-6 mb-4 with_homebattery">
                   <div class="card border-left-success shadow h-100 py-2">
                       <div class="card-body">
                           <div class="row no-gutters align-items-center">
@@ -472,7 +480,7 @@
               </div>
 
 
-              <div class="col-xl-3 col-md-6 mb-4" id="with_homebattery" style="display: none;">
+              <div class="col-xl-3 col-md-6 mb-4 with_homebattery" style="display: none;">
                 <div class="card border-left-warning shadow h-100 py-2">
                     <div class="card-body">
                         <div class="row no-gutters align-items-center">
@@ -534,6 +542,32 @@
                         $.post( "/settings?mode=" + mode);
                       }
                     }
+                    function toggleMqttEdit() {
+                        mqttEditMode = !mqttEditMode;
+                        $('.mqtt_settings').toggle();
+                        if (mqttEditMode) {
+                            $('#edit_mqtt_button').text("Close Settings")
+                        } else {
+                            $('#edit_mqtt_button').text("Edit Settings")
+                        }
+                    }
+                    function configureMqtt() {
+                        var mqtt_broker_ip=$('#mqtt_broker_ip').val();
+                        var mqtt_broker_port=$('#mqtt_broker_port').val();
+                        var mqtt_user=$('#mqtt_user').val();
+                        var mqtt_password=$('#mqtt_password').val();
+                        var mqtt_topic_prefix=$('#mqtt_topic_prefix').val();
+
+                        if (mqtt_broker_ip && mqtt_broker_port) {
+                            $.post( "/settings?mqtt_broker_ip=" + mqtt_broker_ip +
+                                "&mqtt_broker_port=" + mqtt_broker_port + "&mqtt_user=" + mqtt_user +
+                                "&mqtt_password=" + mqtt_password + "&mqtt_topic_prefix=" + mqtt_topic_prefix);
+                            alert('Settings applied');
+                            toggleMqttEdit();
+                        } else {
+                            alert('Missing broker IP or port');
+                        }
+                    }
                     function reboot() {
                         $.post( "/reboot");
                     }
@@ -583,19 +617,42 @@
                                           <button onclick="rawData()" style="width: 120px; display:inline-block;">Raw Data</button>
                                         </div>
                                     </div>
-
-                                  </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-
-                
-
+              </div>
+              <div class="row">
+                  <div style="margin-bottom: 20px;">
+                      <div class="card border-left-primary shadow h-100 py-2">
+                        <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="text font-weight-bold text-primary text-uppercase mb-1">Settings</div>
+                                    <div class="row no-gutters align-items-center">
+                                        <div class="col-auto h5 mb-0 mr-3 font-weight-bold text-gray-800" style="width: 120px;">
+                                            MQTT:
+                                        </div>
+                                        <div class="col">
+                                            <button onclick="toggleMqttEdit()" style="display:inline-block;" id="edit_mqtt_button">Edit Settings</button>
+                                            <div class="mqtt_settings" style="display:none">
+                                                <label>Broker IP: <input id="mqtt_broker_ip"></label>
+                                                <label>Broker Port: <input id="mqtt_broker_port"></label>
+                                                <label>User: <input id="mqtt_user"></label>
+                                                <label>Password: <input id="mqtt_password"></label>
+                                                <label>Topic Prefix: <input id="mqtt_topic_prefix"></label>
+                                                <button onclick="configureMqtt()" style="display:inline-block;">Save</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                  </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                  </div>
                 </div>
-                <!-- END ROW -->
-          
             </div>
         </div>
       </div>
