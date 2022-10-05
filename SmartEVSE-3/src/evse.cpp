@@ -1864,7 +1864,7 @@ uint8_t PollEVNode = NR_EVSES;
                     ModbusRequest++;
                 case 4:                                                         // EV kWh meter, Energy measurement (total charged kWh)
                     // Request Energy if EV meter is configured
-                    if (Node[PollEVNode].EVMeter) {
+                    if (Node[PollEVNode].EVMeter && EVMeter != EM_API) {
 #ifdef LOG_INFO_MODBUS
                         _Serialprintf("ModbusRequest %u: Request Energy Node %u\n", ModbusRequest, PollEVNode);
 #endif
@@ -1874,7 +1874,7 @@ uint8_t PollEVNode = NR_EVSES;
                     ModbusRequest++;
                 case 5:                                                         // EV kWh meter, Power measurement (momentary power in Watt)
                     // Request Power if EV meter is configured
-                    if (Node[PollEVNode].EVMeter) {
+                    if (Node[PollEVNode].EVMeter && EVMeter != EM_API) {
                         requestMeasurement(Node[PollEVNode].EVMeter, Node[PollEVNode].EVAddress,EMConfig[Node[PollEVNode].EVMeter].PRegister, 1);
                         break;
                     }
@@ -1905,7 +1905,7 @@ uint8_t PollEVNode = NR_EVSES;
                     ModbusRequest = 21;
                 case 20:                                                         // EV kWh meter, Current measurement
                     // Request Current if EV meter is configured
-                    if (EVMeter) {
+                    if (EVMeter && EVMeter != EM_API) {
 #ifdef LOG_INFO_MODBUS
                         _Serialprintf("ModbusRequest %u: Request EVMeter Current Measurement\n", ModbusRequest);
 #endif
@@ -2539,7 +2539,7 @@ void ConfigureModbusMode(uint8_t newmode) {
             MBserver.registerWorker(BROADCAST_ADR, ANY_FUNCTION_CODE, &MBbroadcast);
 
             if (MainsMeter != EM_API) MBserver.registerWorker(MainsMeterAddress, ANY_FUNCTION_CODE, &MBMainsMeterResponse);
-            if (EVMeter) MBserver.registerWorker(EVMeterAddress, ANY_FUNCTION_CODE, &MBEVMeterResponse);
+            if (EVMeter != EM_API) MBserver.registerWorker(EVMeterAddress, ANY_FUNCTION_CODE, &MBEVMeterResponse);
             if (PVMeter) MBserver.registerWorker(PVMeterAddress, ANY_FUNCTION_CODE, &MBPVMeterResponse);
 
             // Start ModbusRTU Node background task
@@ -3049,25 +3049,15 @@ void StartwebServer(void) {
     });
 
     webServer.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request) {
-        String mode = "N/A";
+        String mode = getModeNameWeb(Mode);
         int modeId = -1;
-        if(Access_bit == 0)  {
-            mode = "OFF";
-            modeId=0;
-        } else {
-            switch(Mode) {
-                case MODE_NORMAL: mode = "NORMAL"; modeId=1; break;
-                case MODE_SOLAR: mode = "SOLAR"; modeId=2; break;
-                case MODE_SMART: mode = "SMART"; modeId=3; break;
-            }
-        }
         String backlight = "N/A";
         switch(BacklightSet) {
             case 0: backlight = "OFF"; break;
             case 1: backlight = "ON"; break;
             case 2: backlight = "DIMMED"; break;
         }
-        String evstate = StrStateNameWeb[State];
+        String evstate = getStateNameWeb(State);
         String error = getErrorNameWeb(ErrorFlags);
         int errorId = getErrorId(ErrorFlags);
 
@@ -3080,11 +3070,13 @@ void StartwebServer(void) {
 
         boolean evConnected = pilot != PILOT_12V;                    //when access bit = 1, p.ex. in OFF mode, the STATEs are no longer updated
 
-        DynamicJsonDocument doc(1024); // https://arduinojson.org/v6/assistant/
+        DynamicJsonDocument doc(1240); // https://arduinojson.org/v6/assistant/
         doc["version"] = String(VERSION);
         doc["mode"] = mode;
         doc["mode_id"] = modeId;
         doc["car_connected"] = evConnected;
+        doc["uptime"] = esp_timer_get_time() / 1000000;
+        doc["free_heap"] = ESP.getFreeHeap();
 
         if(WiFi.isConnected()) {
             switch(WiFi.status()) {
@@ -3116,21 +3108,7 @@ void StartwebServer(void) {
         doc["evse"]["state_id"] = State;
         doc["evse"]["error"] = error;
         doc["evse"]["error_id"] = errorId;
-
-        if (RFIDReader) {
-            switch(RFIDstatus) {
-                case 0: doc["evse"]["rfid"] = "Ready to read card"; break;
-                case 1: doc["evse"]["rfid"] = "Present"; break;
-                case 2: doc["evse"]["rfid"] = "Card Stored"; break;
-                case 3: doc["evse"]["rfid"] = "Card Deleted"; break;
-                case 4: doc["evse"]["rfid"] = "Card already stored"; break;
-                case 5: doc["evse"]["rfid"] = "Card not in storage"; break;
-                case 6: doc["evse"]["rfid"] = "Card Storage full"; break;
-                case 7: doc["evse"]["rfid"] = "Invalid"; break;
-            }
-         } else {
-             doc["evse"]["rfid"] = "Not Installed";
-         }
+        doc["evse"]["rfid"] = getRFIDStatusWeb(RFIDstatus);
 
         doc["settings"]["charge_current"] = Balanced[0];
         doc["settings"]["override_current"] = OverrideCurrent;
@@ -3142,7 +3120,7 @@ void StartwebServer(void) {
         doc["settings"]["solar_stop_time"] = StopTime;
         doc["settings"]["3phases_enabled"] = enable3f;
         doc["settings"]["mains_meter"] = EMConfig[MainsMeter].Desc;
-        
+        doc["settings"]["ev_meter"] = EMConfig[EVMeter].Desc;
 
 #ifdef MQTT
         doc["settings"]["mqtt_broker_ip"] = MQTTbrokerIp.toString();
@@ -3170,6 +3148,7 @@ void StartwebServer(void) {
         doc["ev_meter"]["import_active_energy"] = round(PowerMeasured / 100)/10; //in kW, precision 1 decimal
         doc["ev_meter"]["total_kwh"] = round(EnergyEV / 100)/10; //in kWh, precision 1 decimal
         doc["ev_meter"]["charged_kwh"] = round(EnergyCharged / 100)/10; //in kWh, precision 1 decimal
+        doc["ev_meter"]["last_data_update"] = evMeterLastUpdate;
 
         doc["mains_meter"]["import_active_energy"] = round(Mains_import_active_energy / 100)/10; //in kWh, precision 1 decimal
         doc["mains_meter"]["export_active_energy"] = round(Mains_export_active_energy / 100)/10; //in kWh, precision 1 decimal
@@ -3424,6 +3403,32 @@ void StartwebServer(void) {
                 }
                 doc["TOTAL"] = Isum;
                 UpdateCurrentData();
+            }
+        }
+
+        String json;
+        serializeJson(doc, json);
+        request->send(200, "application/json", json);
+
+    },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+    });
+
+    webServer.on("/evmeter", HTTP_POST, [](AsyncWebServerRequest *request) {
+        DynamicJsonDocument doc(200);
+
+        if(EVMeter == EM_API) {
+            if (request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3") && request->hasParam("W") && request->hasParam("KWH")) {
+                evMeterLastUpdate = time(NULL);
+
+                Irms_EV[0] = request->getParam("L1")->value().toInt();
+                Irms_EV[1] = request->getParam("L2")->value().toInt();
+                Irms_EV[2] = request->getParam("L3")->value().toInt();
+
+                PowerMeasured = request->getParam("W")->value().toInt();
+
+                EnergyEV = request->getParam("KWH")->value().toInt();
+                if (ResetKwh == 2) EnergyMeterStart = EnergyEV;                 // At powerup, set EnergyEV to kwh meter value
+                EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
             }
         }
 
