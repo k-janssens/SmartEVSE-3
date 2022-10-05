@@ -34,6 +34,7 @@
 #include "utils.h"
 #include "OneWire.h"
 #include "modbus.h"
+#include "ReconnectingMQTTclient.h"
 
 #ifndef DEBUG_DISABLED
 RemoteDebug Debug;
@@ -66,6 +67,17 @@ ESPAsync_WiFiManager ESPAsync_wifiManager(&webServer, &dnsServer, APhostname.c_s
 String Router_SSID;
 String Router_Pass;
 
+#ifdef MQTT
+// MQTT connection info
+String MQTTuser;
+String MQTTpassword;
+String MQTTprefix = APhostname;
+IPAddress MQTTbrokerIp({0, 0, 0, 0});
+uint16_t MQTTbrokerPort;
+ReconnectingMqttClient MQTTclient;
+bool MQTTconfigured = false;
+#endif
+
 // Create a ModbusRTU server and client instance on Serial1 
 ModbusServerRTU MBserver(Serial1, 2000, PIN_RS485_DIR);     // TCP timeout set to 2000 ms
 ModbusClientRTU MBclient(Serial1, PIN_RS485_DIR);  
@@ -82,6 +94,8 @@ struct ModBus MB;          // Used by SmartEVSE fuctions
 const char StrStateName[11][10] = {"A", "B", "C", "D", "COMM_B", "COMM_B_OK", "COMM_C", "COMM_C_OK", "Activate", "B1", "C1"};
 const char StrStateNameWeb[11][17] = {"Ready to Charge", "Connected to EV", "Charging", "D", "Request State B", "State B OK", "Request State C", "State C OK", "Activate", "Charging Stopped", "Stop Charging" };
 const char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
+const char StrModeNameWeb[3][10] = {"Normal", "Smart", "Solar"};
+const char StrRFIDStatusWeb[8][20] = {"Ready to read card","Present", "Card Stored", "Card Deleted", "Card already stored", "Card not in storage", "Card Storage full", "Invalid" };
 
 // Global data
 
@@ -210,6 +224,7 @@ int phasesLastUpdate = 0;
 int32_t IrmsOriginal[3]={0, 0, 0};   
 int homeBatteryCurrent = 0;
 int homeBatteryLastUpdate = 0; // Time in milliseconds
+int evMeterLastUpdate = 0;
 
 struct EMstruct EMConfig[EM_CUSTOM + 1] = {
     /* DESC,      ENDIANNESS,      FCT, DATATYPE,            U_REG,DIV, I_REG,DIV, P_REG,DIV, E_REG_IMP,DIV, E_REG_EXP, DIV */
@@ -507,6 +522,18 @@ const char * getStateNameWeb(uint8_t StateCode) {
     else return "NOSTATE";    
 }
 
+const char * getModeNameWeb(uint8_t ModeCode) {
+    if(Access_bit == 0)  return "OFF";
+    if(ModeCode < 4) return StrModeNameWeb[ModeCode];
+    else return "NOMODE";
+}
+
+const char * getRFIDStatusWeb(uint8_t RFIDStatusCode) {
+    if (RFIDReader) {
+        if (RFIDStatusCode < 8) return StrRFIDStatusWeb[RFIDStatusCode];
+        return "NOSTATUS";
+    } else return "Not Installed";
+}
 
 
 
@@ -1938,6 +1965,9 @@ void Timer1S(void * parameter) {
     //uint8_t Timer5sec = 0;
     uint8_t x;
 
+#ifdef MQTT
+    uint8_t Timer5sec = 0;
+#endif
 
     while(1) { // infinite loop
 
@@ -1949,6 +1979,12 @@ void Timer1S(void * parameter) {
             Irms[2] = 0;
             Isum = 0; 
             UpdateCurrentData();
+        }
+
+        if (EVMeter == EM_API && evMeterLastUpdate < (time(NULL) - 60)) {
+            evMeterLastUpdate = 0;
+            EnergyEV = 0;
+            EnergyCharged = 0;
         }
 
         if (homeBatteryLastUpdate != 0 && homeBatteryLastUpdate < (time(NULL) - 60)) {
@@ -2101,12 +2137,42 @@ void Timer1S(void * parameter) {
         //_Serialprintf("Task 1s free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
 
 
+#ifdef MQTT
+        if (Timer5sec++ >= 5) {
+            if (MQTTclient.is_connected()) {
+                MQTTclient.publish(String(MQTTprefix + "/LastResetReason").c_str(), String(esp_reset_reason()).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/ThreePhaseEnabled").c_str(), String(enable3f).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/Mode").c_str(), getModeNameWeb(Mode), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/ChargeCurrent").c_str(), String(ChargeCurrent).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/Access").c_str(), String(Access_bit).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/RFID").c_str(), getRFIDStatusWeb(RFIDstatus), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/EVConnected").c_str(), String((pilot != PILOT_12V)).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/Temp").c_str(), String(TempEVSE).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/State").c_str(), getStateNameWeb(State), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/Error").c_str(), getErrorNameWeb(ErrorFlags), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/IrmsL1").c_str(), String(Irms[0]).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/IrmsL2").c_str(), String(Irms[1]).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/IrmsL3").c_str(), String(Irms[2]).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/EVChargedKWH").c_str(), String(EnergyCharged).c_str(), true, 0);
+            }
+            Timer5sec = 0;
+        }
+#endif
+
         // Pause the task for 1 Sec
         vTaskDelay(1000 / portTICK_PERIOD_MS);
 
     } // while(1)
 }
 
+#ifdef MQTT
+// MQTT update task
+void MQTTTask(void * parameter) {
+    while (1) {
+        MQTTclient.update();
+    }
+}
+#endif
 
 /**
  * Read energy measurement from modbus
@@ -2619,6 +2685,14 @@ void read_settings(bool write) {
         enable3f = preferences.getUChar("enable3f", false); 
         maxTemp = preferences.getUShort("maxTemp", MAX_TEMPERATURE);
 
+#ifdef MQTT
+        MQTTpassword = preferences.getString("MQTTpassword");
+        MQTTuser = preferences.getString("MQTTuser");
+        MQTTprefix = preferences.getString("MQTTprefix", APhostname);
+        MQTTbrokerIp.fromString(preferences.getString("MQTTbrokerIp", "0.0.0.0"));
+        MQTTbrokerPort = preferences.getUShort("MQTTbrokerPort", 1883);
+#endif
+
         preferences.end();                                  
 
         if (write) write_settings();
@@ -2673,6 +2747,14 @@ void write_settings(void) {
     preferences.putBool("enable3f", enable3f);
     preferences.putUShort("maxTemp", maxTemp);
 
+#ifdef MQTT
+    preferences.putString("MQTTpassword", MQTTpassword);
+    preferences.putString("MQTTuser", MQTTuser);
+    preferences.putString("MQTTprefix", MQTTprefix);
+    preferences.putString("MQTTbrokerIp", MQTTbrokerIp.toString());
+    preferences.putUShort("MQTTbrokerPort", MQTTbrokerPort);
+#endif
+
     preferences.end();
 
 #ifdef LOG_INFO_EVSE
@@ -2694,6 +2776,125 @@ void write_settings(void) {
     ConfigChanged = 1;
 }
 
+#ifdef MQTT
+void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t len, void *) {
+   String message;
+   message.reserve(len+1);
+   for (int i = 0; i<len; ++i) {
+       message += (char) payload[i];
+   }
+
+   String stopic = String(topic);
+
+   _Serialprintf("Got payload with length %d on MQTT topic: %s\nPayload: %s\n", len, topic, message.c_str());
+
+   if (stopic == MQTTprefix + "/Set/Mode") {
+         switch(atoi((char*)payload)) {
+             case 0: // OFF
+                 setAccess(0);
+                 break;
+             case 1: // NORMAL
+                 setAccess(1);
+                 setMode(MODE_NORMAL);
+                 break;
+             case 2: // SOLAR
+                 OverrideCurrent = 0;
+                 setAccess(1);
+                 setMode(MODE_SOLAR);
+                 break;
+             case 3: // SMART
+                 OverrideCurrent = 0;
+                 setAccess(1);
+                 setMode(MODE_SMART);
+                 break;
+         }
+   } else if (stopic == MQTTprefix + "/Set/Access") {
+       setAccess(atoi((char*)payload) == 1);
+   } else if (stopic == MQTTprefix + "/Set/ChargeCurrent") {
+       if(Mode == MODE_NORMAL) {
+           if(atoi((char*)payload) >= ( MinCurrent * 10 ) && atoi((char*)payload) <= ( MaxCurrent * 10 )) {
+               OverrideCurrent = atoi((char*)payload);
+           } else {
+               OverrideCurrent = 0;
+           }
+       }
+   } else if (stopic == MQTTprefix + "/Set/ThreePhaseEnabled") {
+       enable3f = atoi((char*)payload) == 1;
+       write_settings();
+   } else if (stopic == MQTTprefix + "/Set/MainsMeter") {
+      if (MainsMeter != EM_API) return;
+      int32_t L1, L2, L3;
+      int n = sscanf(message.c_str(), "%d:%d:%d", &L1, &L2, &L3);
+      _Serialprintf("MainsMeter MQTT received %d %d %d %d\n", n, L1, L2, L3);
+
+      if (n == 3) {
+         phasesLastUpdate = time(NULL);
+
+         Irms[0] = L1;
+         Irms[1] = L2;
+         Irms[2] = L3;
+
+         int batteryPerPhase = getBatteryCurrent() / 3;
+         Isum = 0;
+         for (int x = 0; x < 3; x++) {
+             IrmsOriginal[x] = Irms[x];
+             Irms[x] -= batteryPerPhase;
+             Isum = Isum + Irms[x];
+         }
+         UpdateCurrentData();
+      }
+   } else if (stopic == MQTTprefix + "/Set/EVMeter") {
+      if (EVMeter != EM_API) return;
+      int32_t L1, L2, L3, W, KWH;
+      int n = sscanf(message.c_str(), "%d:%d:%d:%d:%d", &L1, &L2, &L3, &W, &KWH);
+      _Serialprintf("EVMeter MQTT received %d %d %d %d %d %d\n", n, L1, L2, L3, W, KWH);
+
+      if (n == 5) {
+         evMeterLastUpdate = time(NULL);
+         // Energy measurement
+         EnergyEV = KWH;
+         if (ResetKwh == 2) EnergyMeterStart = EnergyEV;                 // At powerup, set EnergyEV to kwh meter value
+         EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
+
+         // Power measurement
+         PowerMeasured = W;
+
+         // RMS currents
+         Irms_EV[0] = L1;
+         Irms_EV[1] = L2;
+         Irms_EV[2] = L3;
+      }
+   } else if (stopic == MQTTprefix + "/Set/HomeBattery") {
+      homeBatteryCurrent = atoi((char*)payload);
+      homeBatteryLastUpdate = time(NULL);
+  }
+}
+
+void SetupMQTTClient() {
+    // Disconnect existing connection if connected
+    if (MQTTclient.is_connected()) {
+        MQTTclient.stop();
+    }
+
+    // No need to attempt connections if we aren't configured
+    if (strcmp(MQTTbrokerIp.toString().c_str(), "0.0.0.0") == 0) {
+        return;
+    }
+
+    // Setup MQTT client instance
+    if (MQTTuser && MQTTpassword) {
+        MQTTclient.set_credentials(MQTTuser.c_str(), MQTTpassword.c_str());
+    }
+
+    uint8_t mqttBrokerIp4[4] = { MQTTbrokerIp[0], MQTTbrokerIp[1], MQTTbrokerIp[2], MQTTbrokerIp[3] };
+    MQTTclient.set_address(mqttBrokerIp4, MQTTbrokerPort, APhostname.c_str());
+    MQTTclient.set_receive_callback(mqtt_receive_callback, NULL);
+
+    MQTTclient.subscribe(String(MQTTprefix + "/Set/+").c_str(), 1);
+
+    MQTTconfigured = true;
+}
+#endif
 
 /*
 void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
@@ -2942,6 +3143,25 @@ void StartwebServer(void) {
         doc["settings"]["3phases_enabled"] = enable3f;
         doc["settings"]["mains_meter"] = EMConfig[MainsMeter].Desc;
         
+
+#ifdef MQTT
+        doc["settings"]["mqtt_broker_ip"] = MQTTbrokerIp.toString();
+        doc["settings"]["mqtt_broker_port"] = MQTTbrokerPort;
+        doc["settings"]["mqtt_prefix"] = MQTTprefix;
+        doc["settings"]["mqtt_user"] = MQTTuser;
+        doc["settings"]["mqtt_password_set"] = MQTTpassword != "";
+
+        if (MQTTconfigured) {
+            if (MQTTclient.is_connected()) {
+                doc["mqtt"]["status"] = "Connected";
+            } else {
+                doc["mqtt"]["status"] = "Disconnected";
+            }
+        } else {
+            doc["mqtt"]["status"] = "Not Configured";
+        }
+#endif
+
         doc["home_battery"]["current"] = homeBatteryCurrent;
         doc["home_battery"]["last_update"] = homeBatteryLastUpdate;
 
@@ -2985,6 +3205,60 @@ void StartwebServer(void) {
             ledcWrite(LCD_CHANNEL, backlight);
             doc["Backlight"] = backlight;
         }
+
+#ifdef MQTT
+        bool mqttChanged = false;
+
+        if(request->hasParam("mqttBrokerIp")) {
+            String inputMqttBrokerIp = request->getParam("mqttBrokerIp")->value();
+            if (!inputMqttBrokerIp || inputMqttBrokerIp == "") {
+                MQTTbrokerIp.fromString("0.0.0.0");
+            } else {
+                MQTTbrokerIp.fromString(inputMqttBrokerIp);
+            }
+            doc["mqtt_broker_ip"] = MQTTbrokerIp;
+            mqttChanged = true;
+        }
+
+        if(request->hasParam("mqttBrokerPort")) {
+            MQTTbrokerPort = request->getParam("mqttBrokerPort")->value().toInt();
+            if (MQTTbrokerPort == 0) MQTTbrokerPort = 1883;
+            doc["mqtt_broker_port"] = MQTTbrokerPort;
+            mqttChanged = true;
+        }
+
+        if(request->hasParam("mqttPrefix")) {
+            MQTTprefix = request->getParam("mqttPrefix")->value();
+            if (!MQTTprefix || MQTTprefix == "") {
+                MQTTprefix = APhostname;
+            }
+            doc["mqtt_prefix"] = MQTTprefix;
+            mqttChanged = true;
+        }
+
+        if(request->hasParam("mqttUser")) {
+            MQTTuser = request->getParam("mqttUser")->value();
+            if (!MQTTuser || MQTTuser == "") {
+                MQTTuser.clear();
+            }
+            doc["mqtt_user"] = MQTTuser;
+            mqttChanged = true;
+        }
+
+        if(request->hasParam("mqttPassword")) {
+            MQTTpassword = request->getParam("mqttPassword")->value();
+            if (!MQTTpassword || MQTTpassword == "" || MQTTpassword == " ") {
+                MQTTpassword.clear();
+            }
+            doc["mqtt_password_set"] = (MQTTpassword != "");
+            mqttChanged = true;
+        }
+
+        if (mqttChanged) {
+            write_settings();
+            SetupMQTTClient();
+        }
+#endif
 
         if(request->hasParam("disable_override_current")) {
             OverrideCurrent = 0;
@@ -3522,7 +3796,21 @@ void setup() {
         1,                    // Task priority
         NULL                  // Task handleCTReceive
     );
-    
+
+#ifdef MQTT
+    SetupMQTTClient();
+
+    // Create Task For MQTT client
+    xTaskCreate(
+        MQTTTask,        // Function that should be called
+        "MQTTTask",      // Name of the task (for debugging)
+        4096,           // Stack size (bytes)
+        NULL,           // Parameter to pass
+        1,              // Task priority
+        NULL            // Task handle
+    );
+#endif
+
     // Set eModbus LogLevel to 1, to suppress possible E5 errors
     MBUlogLvl = LOG_LEVEL_CRITICAL;
     ConfigureModbusMode(255);

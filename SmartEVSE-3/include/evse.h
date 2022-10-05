@@ -25,6 +25,7 @@
 
 #define __EVSE_MAIN
 
+#define MQTT true // enable or disable MQTT
 
 //for wifi-debugging, don't forget to set the debug levels LOG_EVSE_LOG and LOG_MODBUS_LOG before compiling
 //the wifi-debugger is available by telnetting to your SmartEVSE device

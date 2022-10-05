@@ -65,6 +65,7 @@
             $('#car_connected').text(data.car_connected ? "Yes" : "No");
             $('#state').text(data.evse.state);
             $('#temp').text(data.evse.temp + " °C / " + data.evse.temp_max + " °C");
+            $('#mqtt').text(data.mqtt.status);
             if(data.evse.error != "None") {
               $('#error').text(data.evse.error);
               $('[id=with_errors]').show();
@@ -221,6 +222,14 @@
                                             </div>
                                             <div class="col">
                                               <div class="h5 mb-0 mr-3 text-gray-800" id="temp"></div>
+                                            </div>
+                                        </div>
+                                        <div class="row no-gutters align-items-center">
+                                            <div class="col-auto h5 mb-0 mr-3 font-weight-bold text-gray-800" style="width: 120px;">
+                                                MQTT:
+                                            </div>
+                                            <div class="col">
+                                                <div class="h5 mb-0 mr-3 text-gray-800" id="mqtt"></div>
                                             </div>
                                         </div>
                                     </div>
