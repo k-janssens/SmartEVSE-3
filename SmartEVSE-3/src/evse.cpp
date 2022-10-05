@@ -3188,8 +3188,8 @@ void StartwebServer(void) {
 #ifdef MQTT
         bool mqttChanged = false;
 
-        if(request->hasParam("mqttBrokerIp")) {
-            String inputMqttBrokerIp = request->getParam("mqttBrokerIp")->value();
+        if(request->hasParam("mqtt_broker_ip")) {
+            String inputMqttBrokerIp = request->getParam("mqtt_broker_ip")->value();
             if (!inputMqttBrokerIp || inputMqttBrokerIp == "") {
                 MQTTbrokerIp.fromString("0.0.0.0");
             } else {
@@ -3199,24 +3199,24 @@ void StartwebServer(void) {
             mqttChanged = true;
         }
 
-        if(request->hasParam("mqttBrokerPort")) {
-            MQTTbrokerPort = request->getParam("mqttBrokerPort")->value().toInt();
+        if(request->hasParam("mqtt_broker_port")) {
+            MQTTbrokerPort = request->getParam("mqtt_broker_port")->value().toInt();
             if (MQTTbrokerPort == 0) MQTTbrokerPort = 1883;
             doc["mqtt_broker_port"] = MQTTbrokerPort;
             mqttChanged = true;
         }
 
-        if(request->hasParam("mqttPrefix")) {
-            MQTTprefix = request->getParam("mqttPrefix")->value();
+        if(request->hasParam("mqtt_topic_prefix")) {
+            MQTTprefix = request->getParam("mqtt_topic_prefix")->value();
             if (!MQTTprefix || MQTTprefix == "") {
                 MQTTprefix = APhostname;
             }
-            doc["mqtt_prefix"] = MQTTprefix;
+            doc["mqtt_topic_prefix"] = MQTTprefix;
             mqttChanged = true;
         }
 
-        if(request->hasParam("mqttUser")) {
-            MQTTuser = request->getParam("mqttUser")->value();
+        if(request->hasParam("mqtt_user")) {
+            MQTTuser = request->getParam("mqtt_user")->value();
             if (!MQTTuser || MQTTuser == "") {
                 MQTTuser.clear();
             }
@@ -3224,9 +3224,9 @@ void StartwebServer(void) {
             mqttChanged = true;
         }
 
-        if(request->hasParam("mqttPassword")) {
-            MQTTpassword = request->getParam("mqttPassword")->value();
-            if (!MQTTpassword || MQTTpassword == "" || MQTTpassword == " ") {
+        if(request->hasParam("mqtt_password")) {
+            MQTTpassword = request->getParam("mqtt_password")->value();
+            if (!MQTTpassword || MQTTpassword == "") {
                 MQTTpassword.clear();
             }
             doc["mqtt_password_set"] = (MQTTpassword != "");
