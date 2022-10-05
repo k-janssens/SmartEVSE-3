@@ -1966,7 +1966,7 @@ void Timer1S(void * parameter) {
     uint8_t x;
 
 #ifdef MQTT
-    uint8_t Timer5sec = 0;
+    uint8_t TimerMQTTsec = 0;
 #endif
 
     while(1) { // infinite loop
@@ -2138,12 +2138,15 @@ void Timer1S(void * parameter) {
 
 
 #ifdef MQTT
-        if (Timer5sec++ >= 5) {
+        if (TimerMQTTsec++ >= 5) {
             if (MQTTclient.is_connected()) {
                 MQTTclient.publish(String(MQTTprefix + "/LastResetReason").c_str(), String(esp_reset_reason()).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/Uptime").c_str(), String(esp_timer_get_time() / 1000000).c_str(), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/ThreePhaseEnabled").c_str(), String(enable3f).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/Mode").c_str(), getModeNameWeb(Mode), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/ModeName").c_str(), getModeNameWeb(Mode), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/Mode").c_str(), String(Mode).c_str(), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/ChargeCurrent").c_str(), String(ChargeCurrent).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/OverrideCurrent").c_str(), String(OverrideCurrent).c_str(), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/Access").c_str(), String(Access_bit).c_str(), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/RFID").c_str(), getRFIDStatusWeb(RFIDstatus), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/EVConnected").c_str(), String((pilot != PILOT_12V)).c_str(), true, 0);
@@ -2155,7 +2158,7 @@ void Timer1S(void * parameter) {
                 MQTTclient.publish(String(MQTTprefix + "/IrmsL3").c_str(), String(Irms[2]).c_str(), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/EVChargedKWH").c_str(), String(EnergyCharged).c_str(), true, 0);
             }
-            Timer5sec = 0;
+            TimerMQTTsec = 0;
         }
 #endif
 
@@ -2169,7 +2172,9 @@ void Timer1S(void * parameter) {
 // MQTT update task
 void MQTTTask(void * parameter) {
     while (1) {
-        MQTTclient.update();
+       MQTTclient.update();
+       // Pause the task for 1 Sec
+       vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
 #endif
@@ -2786,8 +2791,6 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
 
    String stopic = String(topic);
 
-   _Serialprintf("Got payload with length %d on MQTT topic: %s\nPayload: %s\n", len, topic, message.c_str());
-
    if (stopic == MQTTprefix + "/Set/Mode") {
          switch(atoi((char*)payload)) {
              case 0: // OFF
@@ -2810,7 +2813,7 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
          }
    } else if (stopic == MQTTprefix + "/Set/Access") {
        setAccess(atoi((char*)payload) == 1);
-   } else if (stopic == MQTTprefix + "/Set/ChargeCurrent") {
+   } else if (stopic == MQTTprefix + "/Set/OverrideCurrent") {
        if(Mode == MODE_NORMAL) {
            if(atoi((char*)payload) >= ( MinCurrent * 10 ) && atoi((char*)payload) <= ( MaxCurrent * 10 )) {
                OverrideCurrent = atoi((char*)payload);
@@ -3086,7 +3089,11 @@ void StartwebServer(void) {
         doc["mode_id"] = modeId;
         doc["car_connected"] = evConnected;
         doc["uptime"] = esp_timer_get_time() / 1000000;
-        doc["free_heap"] = ESP.getFreeHeap();
+
+#ifndef DEBUG_DISABLED
+        doc["debug"]["free_heap"] = ESP.getFreeHeap();
+        doc["debug"]["last_reset_reason"] = esp_reset_reason();
+#endif
 
         if(WiFi.isConnected()) {
             switch(WiFi.status()) {
@@ -3819,7 +3826,7 @@ void setup() {
     xTaskCreate(
         MQTTTask,        // Function that should be called
         "MQTTTask",      // Name of the task (for debugging)
-        4096,           // Stack size (bytes)
+        10000,           // Stack size (bytes)
         NULL,           // Parameter to pass
         1,              // Task priority
         NULL            // Task handle
