@@ -3049,8 +3049,18 @@ void StartwebServer(void) {
     });
 
     webServer.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request) {
-        String mode = getModeNameWeb(Mode);
+        String mode = "N/A";
         int modeId = -1;
+        if(Access_bit == 0)  {
+           mode = "OFF";
+           modeId=0;
+        } else {
+           switch(Mode) {
+              case MODE_NORMAL: mode = "NORMAL"; modeId=1; break;
+              case MODE_SOLAR: mode = "SOLAR"; modeId=2; break;
+              case MODE_SMART: mode = "SMART"; modeId=3; break;
+           }
+        }
         String backlight = "N/A";
         switch(BacklightSet) {
             case 0: backlight = "OFF"; break;
