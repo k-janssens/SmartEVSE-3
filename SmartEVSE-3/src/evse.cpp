@@ -94,7 +94,8 @@ struct ModBus MB;          // Used by SmartEVSE fuctions
 const char StrStateName[11][10] = {"A", "B", "C", "D", "COMM_B", "COMM_B_OK", "COMM_C", "COMM_C_OK", "Activate", "B1", "C1"};
 const char StrStateNameWeb[11][17] = {"Ready to Charge", "Connected to EV", "Charging", "D", "Request State B", "State B OK", "Request State C", "State C OK", "Activate", "Charging Stopped", "Stop Charging" };
 const char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
-const char StrModeNameWeb[3][10] = {"Normal", "Smart", "Solar"};
+const char StrMode[3][10] = {"Normal", "Smart", "Solar"};
+const char StrAccessBit[2][6] = {"Deny", "Allow"};
 const char StrRFIDStatusWeb[8][20] = {"Ready to read card","Present", "Card Stored", "Card Deleted", "Card already stored", "Card not in storage", "Card Storage full", "Invalid" };
 
 // Global data
@@ -522,9 +523,8 @@ const char * getStateNameWeb(uint8_t StateCode) {
     else return "NOSTATE";    
 }
 
-const char * getModeNameWeb(uint8_t ModeCode) {
-    if(Access_bit == 0)  return "OFF";
-    if(ModeCode < 4) return StrModeNameWeb[ModeCode];
+const char * getModeName(uint8_t ModeCode) {
+    if(ModeCode < 4) return StrMode[ModeCode];
     else return "NOMODE";
 }
 
@@ -2142,21 +2142,20 @@ void Timer1S(void * parameter) {
             if (MQTTclient.is_connected()) {
                 MQTTclient.publish(String(MQTTprefix + "/LastResetReason").c_str(), String(esp_reset_reason()).c_str(), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/Uptime").c_str(), String(esp_timer_get_time() / 1000000).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/ThreePhaseEnabled").c_str(), String(enable3f).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/ModeName").c_str(), getModeNameWeb(Mode), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/Mode").c_str(), String(Mode).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/ThreePhaseEnabled").c_str(), (enable3f ? "Yes" : "No"), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/Mode").c_str(), getModeName(Mode), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/ChargeCurrent").c_str(), String(ChargeCurrent).c_str(), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/OverrideCurrent").c_str(), String(OverrideCurrent).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/Access").c_str(), String(Access_bit).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/Access").c_str(), StrAccessBit[Access_bit], true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/RFID").c_str(), getRFIDStatusWeb(RFIDstatus), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/EVConnected").c_str(), String((pilot != PILOT_12V)).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/EVConnected").c_str(), (pilot != PILOT_12V) ? "Yes" : "No", true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/Temp").c_str(), String(TempEVSE).c_str(), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/State").c_str(), getStateNameWeb(State), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/Error").c_str(), getErrorNameWeb(ErrorFlags), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/IrmsL1").c_str(), String(Irms[0]).c_str(), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/IrmsL2").c_str(), String(Irms[1]).c_str(), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/IrmsL3").c_str(), String(Irms[2]).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/EVChargedKWH").c_str(), String(EnergyCharged).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/EVChargedWh").c_str(), String(EnergyCharged).c_str(), true, 0);
             }
             TimerMQTTsec = 0;
         }
@@ -2792,27 +2791,17 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
    String stopic = String(topic);
 
    if (stopic == MQTTprefix + "/Set/Mode") {
-         switch(atoi((char*)payload)) {
-             case 0: // OFF
-                 setAccess(0);
-                 break;
-             case 1: // NORMAL
-                 setAccess(1);
-                 setMode(MODE_NORMAL);
-                 break;
-             case 2: // SOLAR
-                 OverrideCurrent = 0;
-                 setAccess(1);
-                 setMode(MODE_SOLAR);
-                 break;
-             case 3: // SMART
-                 OverrideCurrent = 0;
-                 setAccess(1);
-                 setMode(MODE_SMART);
-                 break;
-         }
+      if (message == "Normal") {
+           setMode(MODE_NORMAL);
+      } else if (message == "Solar") {
+           OverrideCurrent = 0;
+           setMode(MODE_SOLAR);
+      } else if (message == "Smart") {
+           OverrideCurrent = 0;
+           setMode(MODE_SMART);
+      }
    } else if (stopic == MQTTprefix + "/Set/Access") {
-       setAccess(atoi((char*)payload) == 1);
+       setAccess(message == "Allow");
    } else if (stopic == MQTTprefix + "/Set/OverrideCurrent") {
        if(Mode == MODE_NORMAL) {
            if(atoi((char*)payload) >= ( MinCurrent * 10 ) && atoi((char*)payload) <= ( MaxCurrent * 10 )) {
@@ -2822,7 +2811,7 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
            }
        }
    } else if (stopic == MQTTprefix + "/Set/ThreePhaseEnabled") {
-       enable3f = atoi((char*)payload) == 1;
+       enable3f = message == "Yes";
        write_settings();
    } else if (stopic == MQTTprefix + "/Set/MainsMeter") {
       if (MainsMeter != EM_API) return;
@@ -2848,14 +2837,14 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
       }
    } else if (stopic == MQTTprefix + "/Set/EVMeter") {
       if (EVMeter != EM_API) return;
-      int32_t L1, L2, L3, W, KWH;
-      int n = sscanf(message.c_str(), "%d:%d:%d:%d:%d", &L1, &L2, &L3, &W, &KWH);
-      _Serialprintf("EVMeter MQTT received %d %d %d %d %d %d\n", n, L1, L2, L3, W, KWH);
+      int32_t L1, L2, L3, W, WH;
+      int n = sscanf(message.c_str(), "%d:%d:%d:%d:%d", &L1, &L2, &L3, &W, &WH);
+      _Serialprintf("EVMeter MQTT received %d %d %d %d %d %d\n", n, L1, L2, L3, W, WH);
 
       if (n == 5) {
          evMeterLastUpdate = time(NULL);
          // Energy measurement
-         EnergyEV = KWH;
+         EnergyEV = WH;
          if (ResetKwh == 2) EnergyMeterStart = EnergyEV;                 // At powerup, set EnergyEV to kwh meter value
          EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
 
@@ -3443,7 +3432,7 @@ void StartwebServer(void) {
 
                 PowerMeasured = request->getParam("W")->value().toInt();
 
-                EnergyEV = request->getParam("KWH")->value().toInt();
+                EnergyEV = request->getParam("WH")->value().toInt();
                 if (ResetKwh == 2) EnergyMeterStart = EnergyEV;                 // At powerup, set EnergyEV to kwh meter value
                 EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
             }
