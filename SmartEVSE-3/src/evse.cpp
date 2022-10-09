@@ -629,7 +629,7 @@ void setState(uint8_t NewState, bool forceState) {
         case STATE_C:                                                           // State C2
             ActivationMode = 255;                                               // Disable ActivationMode
             CONTACTOR1_ON;      
-            if(Mode == MODE_NORMAL && enable3f)                                 // Contactor1 ON
+            if(Mode != MODE_SOLAR && enable3f)                                  // Contactor1 ON
                 CONTACTOR2_ON;                                                  // Contactor2 ON
             LCDTimer = 0;
             break;
