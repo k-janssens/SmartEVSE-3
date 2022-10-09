@@ -1220,9 +1220,7 @@ uint8_t setItemValue(uint8_t nav, uint16_t val) {
             setSolarStopTimer(val);
             break;
         case STATUS_ACCESS:
-            if (val == 0 || val == 1) {
-                setAccess(val);
-            }
+            setAccess(val == 1);
             break;
         case STATUS_CONFIG_CHANGED:
             ConfigChanged = val;
@@ -3261,20 +3259,20 @@ void StartwebServer(void) {
             String mode = request->getParam("mode")->value();
             switch(mode.toInt()) {
                 case 0: // OFF
-                    setAccess(0);
+                    setAccess(false);
                     break;
                 case 1:
-                    setAccess(1);
+                    setAccess(true);
                     setMode(MODE_NORMAL);
                     break;
                 case 2:
                     OverrideCurrent = 0;
-                    setAccess(1);
+                    setAccess(true);
                     setMode(MODE_SOLAR);
                     break;
                 case 3:
                     OverrideCurrent = 0;
-                    setAccess(1);
+                    setAccess(true);
                     setMode(MODE_SMART);
                     break;
                 default:
