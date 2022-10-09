@@ -1972,16 +1972,21 @@ void Timer1S(void * parameter) {
     while(1) { // infinite loop
 
         // Reset data if API data is too old
-        if (MainsMeter == EM_API && phasesLastUpdate < (time(NULL) - 60)) {
+        if (MainsMeter == EM_API && phasesLastUpdate < (time(NULL) - 20)) {
             phasesLastUpdate=0;
             Irms[0] = 0;
             Irms[1] = 0;
             Irms[2] = 0;
-            Isum = 0; 
-            UpdateCurrentData();
+            Isum = 0;
+            ErrorFlags |= CT_NOCOMM;
+            if (State == STATE_C) setState(STATE_C1);                       // tell EV to stop charging
+            else setState(STATE_B1);                                        // when we are not charging switch to State B1
+#ifdef LOG_WARN_EVSE
+            _Serialprintf("Error, communication error!\n");
+#endif
         }
 
-        if (EVMeter == EM_API && evMeterLastUpdate < (time(NULL) - 60)) {
+        if (EVMeter == EM_API && evMeterLastUpdate < (time(NULL) - 20)) {
             evMeterLastUpdate = 0;
             EnergyEV = 0;
             EnergyCharged = 0;
@@ -2833,6 +2838,8 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
              Irms[x] -= batteryPerPhase;
              Isum = Isum + Irms[x];
          }
+
+         if ((ErrorFlags & CT_NOCOMM)) ErrorFlags &= ~CT_NOCOMM;
          UpdateCurrentData();
       }
    } else if (stopic == MQTTprefix + "/Set/EVMeter") {
@@ -3340,6 +3347,7 @@ void StartwebServer(void) {
 
         if(MainsMeter == EM_API) {
             if(request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3")) {
+                if ((ErrorFlags & CT_NOCOMM)) ErrorFlags &= ~CT_NOCOMM;
                 phasesLastUpdate = time(NULL);
 
                 Irms[0] = request->getParam("L1")->value().toInt();
