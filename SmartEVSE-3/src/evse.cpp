@@ -2839,7 +2839,7 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
       int n = sscanf((char*)payload, "%d:%d:%d", &L1, &L2, &L3);
       _Serialprintf("MainsMeter MQTT received %d %d %d %d\n", n, L1, L2, L3);
 
-      if (n == 3) {
+      if (n == 3 && L1 < 1000 && L2 < 1000 && L3 < 1000) {
          phasesLastUpdate = time(NULL);
          if (LoadBl <2) timeout = 10;
 
@@ -2863,7 +2863,7 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
       int n = sscanf((char*)payload, "%d:%d:%d:%d:%d", &L1, &L2, &L3, &W, &WH);
       _Serialprintf("EVMeter MQTT received %d %d %d %d %d %d\n", n, L1, L2, L3, W, WH);
 
-      if (n == 5) {
+      if (n == 5 && L1 < 1000 && L2 < 1000 && L3 < 1000 && W < 100000) {
          evMeterLastUpdate = time(NULL);
          // Energy measurement
          EnergyEV = WH;
