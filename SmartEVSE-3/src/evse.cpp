@@ -134,6 +134,7 @@ String APpassword = "00000000";
 
 boolean enable3f = USE_3PHASES;
 uint16_t maxTemp = MAX_TEMPERATURE;
+boolean defaultAccess = DEFAULT_ACCESS;
 
 int32_t Irms[3]={0, 0, 0};                                                  // Momentary current per Phase (23 = 2.3A) (resolution 100mA)
 int32_t Irms_EV[3]={0, 0, 0};                                               // Momentary current per Phase (23 = 2.3A) (resolution 100mA)
@@ -647,7 +648,7 @@ void setState(uint8_t NewState, bool forceState) {
 
 void setAccess(bool Access) {
     Access_bit = Access;
-    if (Access == 0) {
+    if (!Access) {
         if (State == STATE_C) setState(STATE_C1);                               // Determine where to switch to.
         else if (State == STATE_B) setState(STATE_B1);
     }
@@ -1082,6 +1083,9 @@ uint8_t setItemValue(uint8_t nav, uint16_t val) {
         case MENU_MAX_TEMP:
             maxTemp = val;
             break;
+        case MENU_DEFAULT_ACCESS:
+            defaultAccess = val == 1;
+            break;
         case MENU_3F:
             enable3f = val == 1;
             break;
@@ -1243,6 +1247,8 @@ uint16_t getItemValue(uint8_t nav) {
     switch (nav) {
         case MENU_MAX_TEMP:
             return maxTemp;
+        case MENU_DEFAULT_ACCESS:
+            return defaultAccess;
         case MENU_3F:
             return enable3f;
         case MENU_CONFIG:
@@ -2611,8 +2617,6 @@ void validate_settings(void) {
 
     // RFID reader set to Enable One card, the EVSE is disabled by default
     if (RFIDReader == 2) Access_bit = 0;
-    // Enable access if no access switch used
-    else if (Switch != 1 && Switch != 2) Access_bit = 1;
     // Sensorbox v2 has always address 0x0A
     if (MainsMeter == EM_SENSORBOX) MainsMeterAddress = 0x0A;
     // Disable PV reception if not configured
@@ -2691,6 +2695,7 @@ void read_settings(bool write) {
 
         enable3f = preferences.getUChar("enable3f", false); 
         maxTemp = preferences.getUShort("maxTemp", MAX_TEMPERATURE);
+        defaultAccess = preferences.getUChar("defaultAccess", DEFAULT_ACCESS);
 
 #ifdef MQTT
         MQTTpassword = preferences.getString("MQTTpassword");
@@ -2753,6 +2758,7 @@ void write_settings(void) {
 
     preferences.putBool("enable3f", enable3f);
     preferences.putUShort("maxTemp", maxTemp);
+    preferences.putBool("defaultAccess", defaultAccess);
 
 #ifdef MQTT
     preferences.putString("MQTTpassword", MQTTpassword);
@@ -3834,6 +3840,9 @@ void setup() {
   
     BacklightTimer = BACKLIGHT;
     GLCD_init();
+
+    // Set Access_bit from defaultAccess setting on boot
+    Access_bit = defaultAccess;
           
 }
 

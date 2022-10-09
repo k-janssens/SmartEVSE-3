@@ -164,6 +164,7 @@ extern RemoteDebug Debug;
 #define AP_PASSWORD "00000000"
 #define USE_3PHASES 0
 #define MAX_TEMPERATURE 65
+#define DEFAULT_ACCESS 1
 
 
 // Mode settings
@@ -309,8 +310,9 @@ extern RemoteDebug Debug;
 #define MENU_EMCUSTOM_READMAX 36                                                // 0x0218: Maximum register read (ToDo)
 #define MENU_WIFI 37                                                            // 0x0219: WiFi mode
 #define MENU_3F 38
-#define MENU_MAX_TEMP 39
-#define MENU_EXIT 40
+#define MENU_DEFAULT_ACCESS 39
+#define MENU_MAX_TEMP 40
+#define MENU_EXIT 41
 
 #define MENU_STATE 50
 
@@ -435,6 +437,7 @@ extern bool LocalTimeSet;
 extern uint8_t MenuItems[MENU_EXIT];
 extern boolean enable3f;
 extern uint16_t maxTemp;
+extern boolean defaultAccess;
 extern uint8_t ExternalMaster;
 
 const struct {
@@ -489,8 +492,9 @@ const struct {
     {"EMEDIV", "ENE DIVI","Divisor for Energy (kWh) of custom electric meter",  0, 7, EMCUSTOM_EDIVISOR},
     {"EMREAD", "READ MAX","Max register read at once of custom electric meter", 3, 255, 3},
     {"WIFI",   "WIFI",    "Connect to WiFi access point",                       0, 2, WIFI_MODE},
-    {"EV3P",   "3 PHASE",  "Can EV use 3 phases",                               0, 1, USE_3PHASES},
-    {"MXTMP",  "MAX TEMP",  "Maximum temperature for the EVSE module",          40, 75, MAX_TEMPERATURE},
+    {"EV3P",   "3 PHASE", "Can EV use 3 phases",                                0, 1, USE_3PHASES},
+    {"DACCE",  "ACCESS",  "Default access setting",                             0, 1, DEFAULT_ACCESS},
+    {"MXTMP",  "MAX TEMP", "Maximum temperature for the EVSE module",           40, 75, MAX_TEMPERATURE},
 
     {"EXIT", "EXIT", "EXIT", 0, 0, 0}
 };

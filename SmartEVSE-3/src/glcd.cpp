@@ -745,6 +745,8 @@ const char * getMenuItemOption(uint8_t nav) {
             return Str;
         case MENU_3F:
             return enable3f ? "Yes" : "No";
+        case MENU_DEFAULT_ACCESS:
+            return defaultAccess ? "Def.Allow" : "Def.Deny";
         case MENU_CONFIG:
             if (Config) return StrFixed;
             else return StrSocket;
@@ -856,6 +858,7 @@ uint8_t getMenuItems (void) {
         MenuItems[m++] = MENU_IMPORT;                                           // - Import Current from Grid (A)
     }
     MenuItems[m++] = MENU_3F;
+    MenuItems[m++] = MENU_DEFAULT_ACCESS;
     MenuItems[m++] = MENU_MAX_TEMP;
     MenuItems[m++] = MENU_LOADBL;                                               // Load Balance Setting (0:Disable / 1:Master / 2-8:Node)
     if (Mode && LoadBl < 2) {                                                   // ? Mode Smart/Solar and Load Balancing Disabled/Master?
@@ -888,7 +891,9 @@ uint8_t getMenuItems (void) {
         }
         MenuItems[m++] = MENU_EVMETER;                                          // - Type of EV electric meter (0: Disabled / Constants EM_*)
         if (EVMeter) {                                                          // - ? EV meter configured?
-            MenuItems[m++] = MENU_EVMETERADDRESS;                               // - - Address of EV electric meter (5 - 254)
+            if (EVMeter != EM_API) {                                            // - If EV meter is not API, do not show address option
+                MenuItems[m++] = MENU_EVMETERADDRESS;                           // - - Address of EV electric meter (5 - 254)
+            }
         }
         if (LoadBl < 2) {                                                       // - ? Load Balancing Disabled/Master?
             if (MainsMeter == EM_CUSTOM || PVMeter == EM_CUSTOM || EVMeter == EM_CUSTOM) { // ? Custom electric meter used?
