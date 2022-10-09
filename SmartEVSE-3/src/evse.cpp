@@ -2127,9 +2127,7 @@ void Timer1S(void * parameter) {
             } else {                                                        // Normal mode
                 Imeasured = 0;                                              // No measurements, so we set it to zero
                 ModbusRequest = 6;                                          // Start with state 5 (poll Nodes)
-                if (EVMeter != EM_API || phasesLastUpdate > (time(NULL) - 10)) {
-                    timeout = 10;                                               // reset timeout counter (not checked for Master)
-                }
+                timeout = 10;                                               // reset timeout counter (not checked for Master)
             }
             Broadcast = 1;                                                  // repeat every two seconds
         }
@@ -2836,12 +2834,14 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
        }
    } else if (stopic == MQTTprefix + "/Set/MainsMeter") {
       if (MainsMeter != EM_API) return;
+
       int32_t L1, L2, L3;
       int n = sscanf((char*)payload, "%d:%d:%d", &L1, &L2, &L3);
       _Serialprintf("MainsMeter MQTT received %d %d %d %d\n", n, L1, L2, L3);
 
       if (n == 3) {
          phasesLastUpdate = time(NULL);
+         if (LoadBl <2) timeout = 10;
 
          Irms[0] = L1;
          Irms[1] = L2;
@@ -3363,6 +3363,7 @@ void StartwebServer(void) {
         if(MainsMeter == EM_API) {
             if(request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3")) {
                 phasesLastUpdate = time(NULL);
+                if (LoadBl <2) timeout = 10;
 
                 Irms[0] = request->getParam("L1")->value().toInt();
                 Irms[1] = request->getParam("L2")->value().toInt();
