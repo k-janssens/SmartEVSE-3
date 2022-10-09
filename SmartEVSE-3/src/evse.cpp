@@ -506,6 +506,24 @@ uint8_t Pilot() {
     return PILOT_NOK;                                                       // Pilot NOT ok
 }
 
+uint8_t getErrorId(uint8_t ErrorCode) {
+    uint8_t count = 0;
+    //find the error bit that is set
+    while (ErrorCode) {
+        count++;
+        ErrorCode = ErrorCode >> 1;
+    }
+    return count;
+}
+
+
+const char * getErrorNameWeb(uint8_t ErrorCode) {
+    uint8_t count = 0;
+    const static char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
+    count = getErrorId(ErrorCode);
+    if(count < 9) return StrErrorNameWeb[count];
+    else return "Multiple Errors";
+}
 
 /**
  * Get name of a state
@@ -520,13 +538,19 @@ const char * getStateName(uint8_t StateCode) {
 
 
 const char * getStateNameWeb(uint8_t StateCode) {
+    if (ErrorFlags) {
+        return getErrorNameWeb(ErrorFlags);
+    }
+    if (Access_bit == 0) {
+        return "No Access";
+    }
     if(StateCode < 11) return StrStateNameWeb[StateCode];
-    else return "NOSTATE";    
+    else return "UNKNOWN";
 }
 
 const char * getModeName(uint8_t ModeCode) {
     if(ModeCode < 4) return StrMode[ModeCode];
-    else return "NOMODE";
+    else return "UNKNOWN";
 }
 
 const char * getRFIDStatusWeb(uint8_t RFIDStatusCode) {
@@ -536,26 +560,6 @@ const char * getRFIDStatusWeb(uint8_t RFIDStatusCode) {
     } else return "Not Installed";
 }
 
-
-
-uint8_t getErrorId(uint8_t ErrorCode) {
-    uint8_t count = 0;
-    //find the error bit that is set
-    while (ErrorCode) {
-        count++;
-        ErrorCode = ErrorCode >> 1;
-    }    
-    return count;
-}
-
-
-const char * getErrorNameWeb(uint8_t ErrorCode) {
-    uint8_t count = 0;
-    const static char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
-    count = getErrorId(ErrorCode);
-    if(count < 9) return StrErrorNameWeb[count];
-    else return "Multiple Errors";
-}
 
 /**
  * Set EVSE mode
@@ -669,7 +673,7 @@ void setAccess(bool Access) {
  */
 // 
 int getBatteryCurrent(void) {
-    int currentTime = time(NULL) - 60; // The data should not be older than 1 minute
+    int currentTime = time(NULL) - 20; // The data should not be older than 1 minute
     
     if (Mode == MODE_SOLAR && homeBatteryLastUpdate > (currentTime)) {
         return homeBatteryCurrent;
@@ -1976,27 +1980,30 @@ void Timer1S(void * parameter) {
     while(1) { // infinite loop
 
         // Reset data if API data is too old
-        if (MainsMeter == EM_API && phasesLastUpdate < (time(NULL) - 20)) {
-            phasesLastUpdate=0;
-            Irms[0] = 0;
-            Irms[1] = 0;
-            Irms[2] = 0;
-            Isum = 0;
-            ErrorFlags |= CT_NOCOMM;
-            if (State == STATE_C) setState(STATE_C1);                       // tell EV to stop charging
-            else setState(STATE_B1);                                        // when we are not charging switch to State B1
-#ifdef LOG_WARN_EVSE
-            _Serialprintf("Error, communication error!\n");
-#endif
+        if (MainsMeter == EM_API && phasesLastUpdate < (time(NULL) - 10)) {
+            if (phasesLastUpdate != -1) {
+                phasesLastUpdate = -1;
+
+                Irms[0] = 0;
+                Irms[1] = 0;
+                Irms[2] = 0;
+                Isum = 0;
+
+                #ifdef LOG_WARN_EVSE
+                _Serialprintf("API MainsMeter meaurements timed out!\n");
+                #endif
+            }
+
+            timeout = 0;
         }
 
-        if (EVMeter == EM_API && evMeterLastUpdate < (time(NULL) - 20)) {
-            evMeterLastUpdate = 0;
+        if (EVMeter == EM_API && evMeterLastUpdate < (time(NULL) - 20) && evMeterLastUpdate != -1) {
+            evMeterLastUpdate = -1;
             EnergyEV = 0;
             EnergyCharged = 0;
         }
 
-        if (homeBatteryLastUpdate != 0 && homeBatteryLastUpdate < (time(NULL) - 60)) {
+        if (homeBatteryLastUpdate != 0 && homeBatteryLastUpdate < (time(NULL) - 20)) {
             homeBatteryCurrent = 0;
             homeBatteryLastUpdate = 0;
         }
@@ -2074,7 +2081,7 @@ void Timer1S(void * parameter) {
             if (BalancedState[x] == STATE_C) Node[x].Timer++;
         }
 
-        if ( (timeout == 0) && !(ErrorFlags & CT_NOCOMM) && MainsMeter != EM_API) { // timeout if CT current measurement takes > 10 secs
+        if ((timeout == 0) && !(ErrorFlags & CT_NOCOMM)) { // timeout if CT current measurement takes > 10 secs
             ErrorFlags |= CT_NOCOMM;
             if (State == STATE_C) setState(STATE_C1);                       // tell EV to stop charging
             else setState(STATE_B1);                                        // when we are not charging switch to State B1
@@ -2120,7 +2127,9 @@ void Timer1S(void * parameter) {
             } else {                                                        // Normal mode
                 Imeasured = 0;                                              // No measurements, so we set it to zero
                 ModbusRequest = 6;                                          // Start with state 5 (poll Nodes)
-                timeout = 10;                                               // reset timeout counter (not checked for Master)
+                if (EVMeter != EM_API || phasesLastUpdate > (time(NULL) - 10)) {
+                    timeout = 10;                                               // reset timeout counter (not checked for Master)
+                }
             }
             Broadcast = 1;                                                  // repeat every two seconds
         }
@@ -2693,7 +2702,7 @@ void read_settings(bool write) {
         WIFImode = preferences.getUChar("WIFImode",WIFI_MODE);
         APpassword = preferences.getString("APpassword",AP_PASSWORD);
 
-        enable3f = preferences.getUChar("enable3f", false); 
+        enable3f = preferences.getUChar("enable3f", USE_3PHASES);
         maxTemp = preferences.getUShort("maxTemp", MAX_TEMPERATURE);
         defaultAccess = preferences.getUChar("defaultAccess", DEFAULT_ACCESS);
 
@@ -2791,26 +2800,24 @@ void write_settings(void) {
 
 #ifdef MQTT
 void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t len, void *) {
-   String message;
-   message.reserve(len+1);
-   for (int i = 0; i<len; ++i) {
-       message += (char) payload[i];
-   }
-
    String stopic = String(topic);
 
    if (stopic == MQTTprefix + "/Set/Mode") {
-      if (message == "Normal") {
+      if (memcmp(payload, "Normal", 6) == 0) {
            setMode(MODE_NORMAL);
-      } else if (message == "Solar") {
+      } else if (memcmp(payload, "Solar", 5) == 0) {
            OverrideCurrent = 0;
            setMode(MODE_SOLAR);
-      } else if (message == "Smart") {
+      } else if (memcmp(payload, "Smart", 5) == 0) {
            OverrideCurrent = 0;
            setMode(MODE_SMART);
       }
    } else if (stopic == MQTTprefix + "/Set/Access") {
-       setAccess(message == "Allow");
+       if (memcmp(payload, "Allow", 5) == 0) {
+           setAccess(true);
+       } else if (memcmp(payload, "Deny", 5) == 0) {
+           setAccess(false);
+       }
    } else if (stopic == MQTTprefix + "/Set/OverrideCurrent") {
        if(Mode == MODE_NORMAL) {
            if(atoi((char*)payload) >= ( MinCurrent * 10 ) && atoi((char*)payload) <= ( MaxCurrent * 10 )) {
@@ -2820,12 +2827,17 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
            }
        }
    } else if (stopic == MQTTprefix + "/Set/ThreePhaseEnabled") {
-       enable3f = message == "Yes";
-       write_settings();
+       if (memcmp(payload, "Yes", 3) == 0) {
+           enable3f = true;
+           write_settings();
+       } else if (memcmp(payload, "No", 2) == 0) {
+           enable3f = false;
+           write_settings();
+       }
    } else if (stopic == MQTTprefix + "/Set/MainsMeter") {
       if (MainsMeter != EM_API) return;
       int32_t L1, L2, L3;
-      int n = sscanf(message.c_str(), "%d:%d:%d", &L1, &L2, &L3);
+      int n = sscanf((char*)payload, "%d:%d:%d", &L1, &L2, &L3);
       _Serialprintf("MainsMeter MQTT received %d %d %d %d\n", n, L1, L2, L3);
 
       if (n == 3) {
@@ -2843,13 +2855,12 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
              Isum = Isum + Irms[x];
          }
 
-         if ((ErrorFlags & CT_NOCOMM)) ErrorFlags &= ~CT_NOCOMM;
          UpdateCurrentData();
       }
    } else if (stopic == MQTTprefix + "/Set/EVMeter") {
       if (EVMeter != EM_API) return;
       int32_t L1, L2, L3, W, WH;
-      int n = sscanf(message.c_str(), "%d:%d:%d:%d:%d", &L1, &L2, &L3, &W, &WH);
+      int n = sscanf((char*)payload, "%d:%d:%d:%d:%d", &L1, &L2, &L3, &W, &WH);
       _Serialprintf("EVMeter MQTT received %d %d %d %d %d %d\n", n, L1, L2, L3, W, WH);
 
       if (n == 5) {
@@ -3351,7 +3362,6 @@ void StartwebServer(void) {
 
         if(MainsMeter == EM_API) {
             if(request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3")) {
-                if ((ErrorFlags & CT_NOCOMM)) ErrorFlags &= ~CT_NOCOMM;
                 phasesLastUpdate = time(NULL);
 
                 Irms[0] = request->getParam("L1")->value().toInt();
