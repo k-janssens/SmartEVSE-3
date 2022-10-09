@@ -1,0 +1,38 @@
+# Example of dashboard to use with SmartEVSE in MQTT client mode with HomeAssistant
+
+views:
+  visible:
+    - title: Car
+      path: car
+      badges: [ ]
+      cards:
+        - type: vertical-stack
+          cards:
+            - type: entity
+              entity: input_select.smartevse_mode
+            - type: entity
+              entity: input_select.smartevse_access
+            - type: entities
+              entities:
+                - entity: sensor.smartevse_ev_connected
+                - entity: sensor.smartevse_charge_current
+                - entity: sensor.smartevse_override_current
+                - entity: sensor.smartevse_access
+                - entity: sensor.smartevse_error
+                - entity: sensor.smartevse_three_phase_enabled
+        - type: vertical-stack
+          cards:
+            - type: entity
+              entity: sensor.smartevse_state
+            - hours_to_show: 24
+              graph: line
+              type: sensor
+              name: Total Charged
+              entity: sensor.smartevse_ev_charged_kwh
+              detail: 1
+            - hours_to_show: 24
+              graph: line
+              type: sensor
+              name: Charging Power
+              entity: sensor.sdm630_total_system_power
+              detail: 1

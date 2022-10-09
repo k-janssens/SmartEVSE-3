@@ -1,0 +1,86 @@
+# Example configuration to use SmartEVSE in MQTT client mode with HomeAssistant
+
+input_select:
+  smartevse_mode:
+    name: SmartEVSE Mode
+    options:
+      - Normal
+      - Smart
+      - Solar
+    initial: Normal
+  smartevse_access:
+    name: SmartEVSE Access
+    options:
+      - Deny
+      - Allow
+    initial: Deny
+
+sensor:
+  - platform: mqtt
+    state_topic: SmartEVSE/ModeName
+    unique_id: smartevse_mode
+    name: SmartEVSE Mode
+    icon: mdi:application-cog-outline
+
+  - platform: mqtt
+    state_topic: SmartEVSE/Access
+    unique_id: smartevse_access
+    name: SmartEVSE Access
+    icon: mdi:lock-outline
+
+  - platform: mqtt
+    state_topic: SmartEVSE/EVConnected
+    unique_id: smartevse_ev_connected
+    name: SmartEVSE EV Connected
+    icon: mdi:power-plug-outline
+
+  - platform: mqtt
+    state_topic: SmartEVSE/State
+    unique_id: smartevse_state
+    name: SmartEVSE State
+    icon: mdi:car-electric-outline
+
+  - platform: mqtt
+    state_topic: SmartEVSE/ChargeCurrent
+    value_template: "{{ value | int / 10 }}"
+    unique_id: smartevse_charge_current
+    device_class: current
+    unit_of_measurement: "A"
+    name: SmartEVSE Charge Current
+    icon: mdi:current-ac
+
+  - platform: mqtt
+    state_topic: SmartEVSE/OverrideCurrent
+    value_template: "{{ value | int / 10 }}"
+    unique_id: smartevse_override_current
+    device_class: current
+    unit_of_measurement: "A"
+    name: SmartEVSE Override Current
+    icon: mdi:current-ac
+
+  - platform: mqtt
+    state_topic: SmartEVSE/EVChargedKWH
+    value_template: "{{ value | float | round(2) }}"
+    unique_id: smartevse_ev_charged_kwh
+    device_class: power
+    unit_of_measurement: "kWh"
+    name: SmartEVSE EV Charged KWh
+    icon: mdi:lightning-bolt-outline
+
+  - platform: mqtt
+    state_topic: SmartEVSE/Error
+    unique_id: smartevse_error
+    name: SmartEVSE Error
+    icon: mdi:alert-circle-outline
+
+  - platform: mqtt
+    state_topic: SmartEVSE/RFID
+    unique_id: smartevse_rfid_status
+    name: SmartEVSE RFID Status
+    icon: mdi:credit-card-outline
+
+  - platform: mqtt
+    state_topic: SmartEVSE/ThreePhaseEnabled
+    unique_id: smartevse_three_phase_enabled
+    name: SmartEVSE Three Phase Enabled
+    icon: mdi:numeric

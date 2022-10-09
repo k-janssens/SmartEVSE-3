@@ -1,0 +1,107 @@
+# Example automations to use with SmartEVSE in MQTT client mode with HomeAssistant
+
+automations:
+  # The following automation updates the SmartEVSE Access input_select helper
+  # with the value received from MQTT
+  - alias: Set SmartEVSE Access Selector from MQTT
+    description: ""
+    trigger:
+      - platform: mqtt
+        topic: SmartEVSE/Access
+    condition:
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: input_select.smartevse_access
+            state: "{{ trigger.payload }}"
+    action:
+      - service: input_select.select_option
+        target:
+          entity_id: input_select.smartevse_access
+        data:
+          option: "{{ trigger.payload }}"
+    mode: single
+
+  # The following automation updates the SmartEVSE Mode input_select helper
+  # with the value received from MQTT
+  - alias: Set SmartEVSE Mode Selector from MQTT
+    description: ""
+    trigger:
+      - platform: mqtt
+        topic: SmartEVSE/Mode
+    condition:
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: input_select.smartevse_mode
+            state: "{{ trigger.payload }}"
+    action:
+      - service: input_select.select_option
+        target:
+          entity_id: input_select.smartevse_mode
+        data:
+          option: "{{ trigger.payload }}"
+    mode: single
+
+  # The following automation pushes EV meter stats to the SmartEVSE
+  # The SmartEVSE will use this data to calculate the energy charged
+  # In this example the data is taken from an SDM630 modbus Kwh meter and sent every 3 seconds
+  # It stops sending if HomeAssistant hasn't received sensor values from the metering device for 60 seconds
+  - alias: Set SmartEVSE EVMeter values
+    description: ""
+    trigger:
+      - platform: time_pattern
+        minutes: "*"
+        seconds: /3
+        hours: "*"
+    condition:
+      - condition: template
+        value_template: >-
+          {{
+          (as_timestamp(now())-as_timestamp(states.sensor.sdm630_frequency_of_supply_voltages.last_updated))
+          < 60 }}
+    action:
+      - service: mqtt.publish
+        data:
+          topic: SmartEVSE/Set/EVMeter
+          payload_template: >-
+            {{ states('sensor.sdm630_phase_1_current') | int * 10 }}:{{
+            states('sensor.sdm630_phase_2_current') | int * 10 }}:{{
+            states('sensor.sdm630_phase_3_current') | int * 10 }}:{{
+            ((states('sensor.sdm630_total_system_power') | float) * 1000) | int
+            }}:{{ (states('sensor.sdm630_import_wh_since_last_reset') | float *
+            1000) | int }}
+    mode: single
+
+  # The following automation sets MainsMeter values so SmartEVSE can use it for balancing
+  # In this example I use my P1 meter values and calculate the current manually
+  # I do this because I also have a single phase PV inverter on phase 2 and the P1 meter data does not include export
+  # It stops sending if HomeAssistant hasn't received sensor values from the metering device for 60 seconds
+  - alias: Set SmartEVSE MainsMeter values
+    description: ""
+    trigger:
+      - platform: time_pattern
+        minutes: "*"
+        seconds: /5
+        hours: "*"
+    condition:
+      - condition: template
+        value_template: >-
+          {{
+          (as_timestamp(now())-as_timestamp(states.sensor.voltage_phase_1.last_updated))
+          < 60 }}
+    action:
+      - service: mqtt.publish
+        data:
+          topic: SmartEVSE/Set/MainsMeter
+          payload_template: >-
+            {% set pcp1 = states('sensor.power_consumed_phase_1') | float(0) * 1000
+            %} {% set vp1 = states('sensor.voltage_phase_1') | float(0) %} {% set
+            pcp2 = states('sensor.power_consumed_phase_2') | float(0) * 1000 %} {%
+            set ppp2 = states('sensor.power_produced_phase_2') | float(0) * 1000 %}
+            {% set vp2 = states('sensor.voltage_phase_2') | float(0) %} {% set pcp3
+            = states('sensor.power_consumed_phase_3') | float(0) * 1000 %} {% set
+            vp3 = states('sensor.voltage_phase_3') | float(0) %} {{ (pcp1 / vp1 *
+            10) | int }}:{% if ppp2 > 0 %}{{ -(ppp2 / vp2 * 10) | int }}{% else %}{{
+            (pcp2 / vp2 * 10) | int }}{% endif %}:{{ (pcp3 / vp3 * 10) | int }}
+    mode: single
