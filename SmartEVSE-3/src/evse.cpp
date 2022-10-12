@@ -1756,8 +1756,8 @@ void EVSEStates(void * parameter) {
             LCDupdate = 0;
         }    
 
-        if ((ErrorFlags & CT_NOCOMM) && timeout == 10) ErrorFlags &= ~CT_NOCOMM;          // Clear communication error, if present
-        
+        if ((ErrorFlags & CT_NOCOMM) && timeout >= 10) ErrorFlags &= ~CT_NOCOMM;          // Clear communication error, if present
+
         // Pause the task for 10ms
         vTaskDelay(10 / portTICK_PERIOD_MS);
     } // while(1) loop
@@ -1976,10 +1976,6 @@ void Timer1S(void * parameter) {
     //uint8_t Timer5sec = 0;
     uint8_t x;
 
-#ifdef MQTT
-    uint8_t TimerMQTTsec = 0;
-#endif
-
     while(1) { // infinite loop
 
         if (homeBatteryLastUpdate != 0 && homeBatteryLastUpdate < (time(NULL) - 20)) {
@@ -2130,31 +2126,6 @@ void Timer1S(void * parameter) {
         // }
 
         //_Serialprintf("Task 1s free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
-
-
-#ifdef MQTT
-        if (TimerMQTTsec++ >= 5) {
-            if (MQTTclient.is_connected()) {
-                MQTTclient.publish(String(MQTTprefix + "/LastResetReason").c_str(), String(esp_reset_reason()).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/Uptime").c_str(), String((char*)(esp_timer_get_time() / 1000000)).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/ThreePhaseEnabled").c_str(), (enable3f ? "Yes" : "No"), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/Mode").c_str(), getModeName(Mode), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/ChargeCurrent").c_str(), String(ChargeCurrent).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/OverrideCurrent").c_str(), String(OverrideCurrent).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/Access").c_str(), StrAccessBit[Access_bit], true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/RFID").c_str(), getRFIDStatusWeb(RFIDstatus), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/EVConnected").c_str(), (pilot != PILOT_12V) ? "Yes" : "No", true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/Temp").c_str(), String(TempEVSE).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/State").c_str(), getStateNameWeb(State), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/Error").c_str(), getErrorNameWeb(ErrorFlags), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/IrmsL1").c_str(), String(Irms[0]).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/IrmsL2").c_str(), String(Irms[1]).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/IrmsL3").c_str(), String(Irms[2]).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/EVChargedWh").c_str(), String(EnergyCharged).c_str(), true, 0);
-            }
-            TimerMQTTsec = 0;
-        }
-#endif
 
         // Pause the task for 1 Sec
         vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -2809,6 +2780,7 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
 
       if (n == 3 && L1 < 1000 && L2 < 1000 && L3 < 1000) {
          phasesLastUpdate = time(NULL);
+
          if (LoadBl <2) timeout = 20;
          if ((ErrorFlags & CT_NOCOMM)) ErrorFlags &= ~CT_NOCOMM; // Clear communication error, if present
 
@@ -3487,6 +3459,7 @@ void WiFiSetup(void) {
 
 
 void NetworkTask(void * parameter) {
+  uint8_t TimerMQTTPubsec = 0;
 
   WiFiSetup();
 
@@ -3531,6 +3504,28 @@ void NetworkTask(void * parameter) {
 
 #ifdef MQTT
             MQTTclient.update();
+
+            if (TimerMQTTPubsec++ >= 5) {
+                if (MQTTclient.is_connected()) {
+                    MQTTclient.publish(String(MQTTprefix + "/LastResetReason").c_str(), String(esp_reset_reason()).c_str(), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/Uptime").c_str(), String((esp_timer_get_time() / 1000000)).c_str(), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/ThreePhaseEnabled").c_str(), (enable3f ? "Yes" : "No"), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/Mode").c_str(), getModeName(Mode), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/ChargeCurrent").c_str(), String(ChargeCurrent).c_str(), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/OverrideCurrent").c_str(), String(OverrideCurrent).c_str(), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/Access").c_str(), StrAccessBit[Access_bit], true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/RFID").c_str(), getRFIDStatusWeb(RFIDstatus), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/EVConnected").c_str(), (pilot != PILOT_12V) ? "Yes" : "No", true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/Temp").c_str(), String(TempEVSE).c_str(), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/State").c_str(), getStateNameWeb(State), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/Error").c_str(), getErrorNameWeb(ErrorFlags), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/IrmsL1").c_str(), String(Irms[0]).c_str(), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/IrmsL2").c_str(), String(Irms[1]).c_str(), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/IrmsL3").c_str(), String(Irms[2]).c_str(), true, 0);
+                    MQTTclient.publish(String(MQTTprefix + "/EVChargedWh").c_str(), String(EnergyCharged).c_str(), true, 0);
+                }
+                TimerMQTTPubsec = 0;
+            }
 #endif
         }
 
