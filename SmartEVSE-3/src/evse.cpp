@@ -63,6 +63,9 @@ String APhostname = "SmartEVSE-" + String( MacId() & 0xffff, 10);           // S
 
 ESPAsync_WiFiManager ESPAsync_wifiManager(&webServer, &dnsServer, APhostname.c_str());
 
+// store network services status
+bool networkServicesStarted = false;
+
 // SSID and PW for your Router
 String Router_SSID;
 String Router_Pass;
@@ -1979,30 +1982,6 @@ void Timer1S(void * parameter) {
 
     while(1) { // infinite loop
 
-        // Reset data if API data is too old
-        if (MainsMeter == EM_API && phasesLastUpdate < (time(NULL) - 10)) {
-            if (phasesLastUpdate != -1) {
-                phasesLastUpdate = -1;
-
-                Irms[0] = 0;
-                Irms[1] = 0;
-                Irms[2] = 0;
-                Isum = 0;
-
-                #ifdef LOG_WARN_EVSE
-                _Serialprintf("API MainsMeter meaurements timed out!\n");
-                #endif
-            }
-
-            timeout = 0;
-        }
-
-        if (EVMeter == EM_API && evMeterLastUpdate < (time(NULL) - 20) && evMeterLastUpdate != -1) {
-            evMeterLastUpdate = -1;
-            EnergyEV = 0;
-            EnergyCharged = 0;
-        }
-
         if (homeBatteryLastUpdate != 0 && homeBatteryLastUpdate < (time(NULL) - 20)) {
             homeBatteryCurrent = 0;
             homeBatteryLastUpdate = 0;
@@ -2157,7 +2136,7 @@ void Timer1S(void * parameter) {
         if (TimerMQTTsec++ >= 5) {
             if (MQTTclient.is_connected()) {
                 MQTTclient.publish(String(MQTTprefix + "/LastResetReason").c_str(), String(esp_reset_reason()).c_str(), true, 0);
-                MQTTclient.publish(String(MQTTprefix + "/Uptime").c_str(), String(esp_timer_get_time() / 1000000).c_str(), true, 0);
+                MQTTclient.publish(String(MQTTprefix + "/Uptime").c_str(), String((char*)(esp_timer_get_time() / 1000000)).c_str(), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/ThreePhaseEnabled").c_str(), (enable3f ? "Yes" : "No"), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/Mode").c_str(), getModeName(Mode), true, 0);
                 MQTTclient.publish(String(MQTTprefix + "/ChargeCurrent").c_str(), String(ChargeCurrent).c_str(), true, 0);
@@ -2182,17 +2161,6 @@ void Timer1S(void * parameter) {
 
     } // while(1)
 }
-
-#ifdef MQTT
-// MQTT update task
-void MQTTTask(void * parameter) {
-    while (1) {
-       MQTTclient.update();
-       // Pause the task for 1 Sec
-       vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-}
-#endif
 
 /**
  * Read energy measurement from modbus
@@ -2841,7 +2809,8 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
 
       if (n == 3 && L1 < 1000 && L2 < 1000 && L3 < 1000) {
          phasesLastUpdate = time(NULL);
-         if (LoadBl <2) timeout = 10;
+         if (LoadBl <2) timeout = 20;
+         if ((ErrorFlags & CT_NOCOMM)) ErrorFlags &= ~CT_NOCOMM; // Clear communication error, if present
 
          Irms[0] = L1;
          Irms[1] = L2;
@@ -2984,15 +2953,7 @@ void onRequest(AsyncWebServerRequest *request){
     request->send(404);
 }
 
-
-
-void StopwebServer(void) {
-    // ws.closeAll();
-    webServer.end();
-}
-
-
-void StartwebServer(void) {
+void SetupWebServer(void) {
 
     webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
         _Serialprint("page / (root) requested and sent\n");
@@ -3363,7 +3324,8 @@ void StartwebServer(void) {
         if(MainsMeter == EM_API) {
             if(request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3")) {
                 phasesLastUpdate = time(NULL);
-                if (LoadBl <2) timeout = 10;
+                if (LoadBl <2) timeout = 20;
+                if ((ErrorFlags & CT_NOCOMM)) ErrorFlags &= ~CT_NOCOMM; // Clear communication error, if present
 
                 Irms[0] = request->getParam("L1")->value().toInt();
                 Irms[1] = request->getParam("L2")->value().toInt();
@@ -3524,10 +3486,9 @@ void WiFiSetup(void) {
 }
 
 
-void SetupNetworkTask(void * parameter) {
+void NetworkTask(void * parameter) {
 
   WiFiSetup();
-  StartwebServer();
 
   while(1) {
 
@@ -3539,12 +3500,10 @@ void SetupNetworkTask(void * parameter) {
 
     if (WIFImode == 2 && LCDTimer > 10 && WiFi.getMode() != WIFI_AP_STA) {
         _Serialprint("Start Portal...\n");
-        StopwebServer();
         ESPAsync_wifiManager.startConfigPortal(APhostname.c_str(), APpassword.c_str());         // blocking until connected or timeout.
         WIFImode = 1;
         write_settings();
         LCDNav = 0;
-        StartwebServer();       //restart webserver
     }
 
     if (WIFImode == 1 && WiFi.getMode() == WIFI_OFF) {
@@ -3556,12 +3515,41 @@ void SetupNetworkTask(void * parameter) {
     if (WIFImode == 0 && WiFi.getMode() != WIFI_OFF) {
         _Serialprint("Stopping WiFi..\n");
         WiFi.disconnect(true);
-    }    
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        if (!networkServicesStarted) {
+            SetupWebServer();       // setup webserver
+
+#ifdef MQTT
+            SetupMQTTClient();      // setup MQTT client
+#endif
+
+            networkServicesStarted = true;
+            _Serialprint("Network services started\n");
+        } else {
+
+#ifdef MQTT
+            MQTTclient.update();
+#endif
+        }
 
 #ifndef DEBUG_DISABLED
-    // Remote debug over WiFi
-    Debug.handle();
+        // Remote debug over WiFi
+        Debug.handle();
 #endif
+
+    } else if (networkServicesStarted) {
+        webServer.end();
+
+#ifdef MQTT
+        MQTTclient.stop();
+#endif
+
+        networkServicesStarted = false;
+        _Serialprint("Network services stopped\n");
+
+    }
 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
   } // while(1)
@@ -3731,7 +3719,7 @@ void setup() {
         "EVSEStates",   // Name of the task (for debugging)
         4096,           // Stack size (bytes)                              // printf needs atleast 1kb
         NULL,           // Parameter to pass
-        1,              // Task priority
+        3,              // Task priority (high)
         NULL            // Task handle
     );
 
@@ -3741,7 +3729,7 @@ void setup() {
         "BlinkLed",     // Name of the task (for debugging)
         1024,           // Stack size (bytes)                              // printf needs atleast 1kb
         NULL,           // Parameter to pass
-        1,              // Task priority
+        2,              // Task priority (low-ish)
         NULL            // Task handle
     );
 
@@ -3751,7 +3739,7 @@ void setup() {
         "Timer100ms",   // Name of the task (for debugging)
         3072,           // Stack size (bytes)                              
         NULL,           // Parameter to pass
-        1,              // Task priority
+        3,              // Task priority (high)
         NULL            // Task handle
     );
 
@@ -3761,37 +3749,23 @@ void setup() {
         "Timer1S",      // Name of the task (for debugging)
         4096,           // Stack size (bytes)                              
         NULL,           // Parameter to pass
-        1,              // Task priority
+        3,              // Task priority (medium)
         NULL            // Task handle
     );
 
-    // Setup WiFi, webserver and firmware OTA
+    // Setup WiFi, webserver, MQTT client and firmware OTA
     // Please be aware that after doing a OTA update, its possible that the active partition is set to OTA1.
     // Uploading a new firmware through USB will however update OTA0, and you will not notice any changes...
 
     // Create Task that setups the network, and the webserver 
     xTaskCreate(
-        SetupNetworkTask,     // Function that should be called
-        "SetupNetworkTask",   // Name of the task (for debugging)
-        10000,                // Stack size (bytes)                              // printf needs atleast 1kb
+        NetworkTask,     // Function that should be called
+        "NetworkTask",   // Name of the task (for debugging)
+        20000,                // Stack size (bytes)                              // printf needs atleast 1kb
         NULL,                 // Parameter to pass
-        1,                    // Task priority
+        1,                    // Task priority (medium)
         NULL                  // Task handleCTReceive
     );
-
-#ifdef MQTT
-    SetupMQTTClient();
-
-    // Create Task For MQTT client
-    xTaskCreate(
-        MQTTTask,        // Function that should be called
-        "MQTTTask",      // Name of the task (for debugging)
-        10000,           // Stack size (bytes)
-        NULL,           // Parameter to pass
-        1,              // Task priority
-        NULL            // Task handle
-    );
-#endif
 
     // Set eModbus LogLevel to 1, to suppress possible E5 errors
     MBUlogLvl = LOG_LEVEL_CRITICAL;
