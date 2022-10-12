@@ -66,6 +66,7 @@
             $('#state').text(data.evse.state);
             $('#temp').text(data.evse.temp + " °C / " + data.evse.temp_max + " °C");
             $('#mqtt').text(data.mqtt.status);
+            $('#uptime').text(data.uptime);
 
             if(data.evse.rfid != "Not Installed") {
               $('#rfid').text(data.evse.rfid);
@@ -176,6 +177,14 @@
                                             </div>
                                             <div class="col">
                                               <div class="h5 mb-0 mr-3 text-gray-800" id="mode"></div>
+                                            </div>
+                                        </div>
+                                        <div class="row no-gutters align-items-center">
+                                            <div class="col-auto h5 mb-0 mr-3 font-weight-bold text-gray-800" style="width: 120px;">
+                                                Uptime:
+                                            </div>
+                                            <div class="col">
+                                                <div class="h5 mb-0 mr-3 text-gray-800" id="uptime"></div>
                                             </div>
                                         </div>
                                         <div class="row no-gutters align-items-center">
