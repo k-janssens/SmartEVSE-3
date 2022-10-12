@@ -3403,45 +3403,6 @@ void StartwebServer(void) {
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
     });
 
-    webServer.on("/currents", HTTP_POST, [](AsyncWebServerRequest *request) {
-        DynamicJsonDocument doc(200);
-
-        if(request->hasParam("battery_current")) {
-            String value = request->getParam("battery_current")->value();
-            homeBatteryCurrent = value.toInt();
-            homeBatteryLastUpdate = time(NULL);
-            doc["battery_current"] = homeBatteryCurrent;
-        }
-
-        if(MainsMeter == EM_API) {
-            if(request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3")) {
-                phasesLastUpdate = time(NULL);
-
-                Irms[0] = request->getParam("L1")->value().toInt();
-                Irms[1] = request->getParam("L2")->value().toInt();
-                Irms[2] = request->getParam("L3")->value().toInt();
-
-                int batteryPerPhase = getBatteryCurrent() / 3;
-                Isum = 0; 
-                for (int x = 0; x < 3; x++) {  
-                    IrmsOriginal[x] = Irms[x];
-                    doc["original"]["L" + x] = Irms[x];
-                    Irms[x] -= batteryPerPhase;           
-                    doc["L" + x] = Irms[x];
-                    Isum = Isum + Irms[x];
-                }
-                doc["TOTAL"] = Isum;
-                UpdateCurrentData();
-            }
-        }
-
-        String json;
-        serializeJson(doc, json);
-        request->send(200, "application/json", json);
-
-    },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
-    });
-
     webServer.on("/evmeter", HTTP_POST, [](AsyncWebServerRequest *request) {
         DynamicJsonDocument doc(200);
 
@@ -3460,19 +3421,6 @@ void StartwebServer(void) {
                 EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
             }
         }
-
-        String json;
-        serializeJson(doc, json);
-        request->send(200, "application/json", json);
-
-    },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
-    });
-
-    webServer.on("/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
-        DynamicJsonDocument doc(200);
-
-        ESP.restart();
-        doc["reboot"] = true;
 
         String json;
         serializeJson(doc, json);
