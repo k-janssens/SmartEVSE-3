@@ -125,10 +125,23 @@ extern RemoteDebug Debug;
 #define MAX_MAINS 25                                                            // max Current the Mains connection can supply
 #define MAX_CURRENT 13                                                          // max charging Current for the EV
 #define MIN_CURRENT 6                                                           // minimum Current the EV will accept
-#define MODE 0                                                                  // Normal EVSE mode
+
+#define MODE_NORMAL 0
+#define MODE_SMART 1
+#define MODE_SOLAR 2
+#define MODE_MIN MODE_NORMAL
+#define MODE_MAX MODE_SOLAR
+#define MODE_DEFAULT MODE_MIN                                                   // Normal EVSE mode
+
 #define LOCK 0                                                                  // No Cable lock
 #define MAX_CIRCUIT 16                                                          // Max current of the EVSE circuit breaker
-#define CONFIG 0                                                                // Configuration: 0= TYPE 2 socket, 1= Fixed Cable
+
+#define CONFIG_SOCKET 0
+#define CONFIG_FIXED 1                                                             // Configuration: 0= TYPE 2 socket, 1= Fixed Cable
+#define CONFIG_MIN CONFIG_SOCKET
+#define CONFIG_MAX CONFIG_FIXED
+#define CONFIG_DEFAULT CONFIG_MIN
+
 #define LOADBL 0                                                                // Load Balancing disabled
 #define SWITCH 0                                                                // 0= Charge on plugin, 1= (Push)Button on IO2 is used to Start/Stop charging.
 #define RC_MON 0                                                                // Residual Current Monitoring on IO3. Disabled=0, RCM14=1
@@ -138,16 +151,26 @@ extern RemoteDebug Debug;
 #define START_CURRENT 4                                                         // Start charging when surplus current on sum of all phases exceeds 4A (Solar)
 #define STOP_TIME 10                                                            // Stop charging after 10 minutes at MIN charge current (Solar)
 #define IMPORT_CURRENT 0                                                        // Allow the use of grid power when solar charging (Amps)
-#define MAINS_METER 1                                                           // Mains Meter, 1= Sensorbox, 2=Phoenix, 3= Finder, 4= Eastron, 5=Custom
 #define GRID 0                                                                  // Grid, 0= 4-Wire CW, 1= 4-Wire CCW, 2= 3-Wire CW, 3= 3-Wire CCW
+
+#define MAINS_METER EM_DISABLED                                                 // Mains Meter, 1= Sensorbox, 2=Phoenix, 3= Finder, 4= Eastron, 5=Custom
 #define MAINS_METER_ADDRESS 10
-#define MAINS_METER_MEASURE 0
-#define PV_METER 0
+#define MAINS_METER_MEASURE_HOME_EVSE_PV 0
+#define MAINS_METER_MEASURE_HOME_EVSE 1
+#define MAINS_METER_MEASURE_HOME 2
+#define MAINS_METER_MEASURE_MIN MAINS_METER_MEASURE_HOME_EVSE_PV
+#define MAINS_METER_MEASURE_MAX MAINS_METER_MEASURE_HOME
+#define MAINS_METER_MEASURE_DEFAULT MAINS_METER_MEASURE_MIN
+
+#define PV_METER EM_DISABLED
 #define PV_METER_ADDRESS 11
-#define EV_METER 0
+
+#define EV_METER EM_DISABLED
 #define EV_METER_ADDRESS 12
-#define MIN_METER_ADDRESS 10
+
+#define MIN_METER_ADDRESS 1
 #define MAX_METER_ADDRESS 247
+
 #define EMCUSTOM_ENDIANESS 0
 #define EMCUSTOM_DATATYPE 0
 #define EMCUSTOM_FUNCTION 4
@@ -164,12 +187,6 @@ extern RemoteDebug Debug;
 #define AP_PASSWORD "00000000"
 #define ENABLE_C2 NOT_PRESENT
 #define MAX_TEMPERATURE 65
-
-
-// Mode settings
-#define MODE_NORMAL 0
-#define MODE_SMART 1
-#define MODE_SOLAR 2
 
 #define MODBUS_BAUDRATE 9600
 #define MODBUS_TIMEOUT 4
@@ -319,6 +336,7 @@ extern RemoteDebug Debug;
 #define _A0_0 digitalWrite(PIN_LCD_A0_B2, LOW);
 #define _A0_1 digitalWrite(PIN_LCD_A0_B2, HIGH);
 
+#define EM_DISABLED 0
 #define EM_SENSORBOX 1                                                          // Mains meter types
 #define EM_PHOENIX_CONTACT 2
 #define EM_FINDER 3
@@ -418,7 +436,7 @@ const struct {
 
     // Node specific configuration
     /* LCD,       Desc,                                                 Min, Max, Default */
-    {"CONFIG",  "Fixed Cable or Type 2 Socket",                       0, 1, CONFIG},
+    {"CONFIG",  "Fixed Cable or Type 2 Socket",                       CONFIG_MIN, CONFIG_MAX, CONFIG_DEFAULT},
     {"LOCK",    "Cable locking actuator type",                        0, 2, LOCK},
     {"MIN",     "MIN Charge Current the EV will accept (per phase)",  6, 16, MIN_CURRENT},
     {"MAX",     "MAX Charge Current for this EVSE (per phase)",       6, 80, MAX_CURRENT},
@@ -426,12 +444,12 @@ const struct {
     {"SWITCH",  "Switch function control on pin SW",                  0, 4, SWITCH},
     {"RCMON",   "Residual Current Monitor on pin RCM",                0, 1, RC_MON},
     {"RFID",    "RFID reader, learn/remove cards",                    0, 5, RFID_READER},
-    {"EV METER","Type of EV electric meter",                          0, EM_CUSTOM, EV_METER},
+    {"EV METER","Type of EV electric meter",                          EM_DISABLED, EM_CUSTOM, EV_METER},
     {"EV ADDR", "Address of EV electric meter",                       MIN_METER_ADDRESS, MAX_METER_ADDRESS, EV_METER_ADDRESS},
 
     // System configuration
     /* Key,    LCD,       Desc,                                                 Min, Max, Default */
-    {"MODE",    "Normal, Smart or Solar EVSE mode",                   0, 2, MODE},
+    {"MODE",    "Normal, Smart or Solar EVSE mode",                   MODE_MIN, MODE_MAX, MODE_DEFAULT},
     {"CIRCUIT", "EVSE Circuit max Current",                           10, 160, MAX_CIRCUIT},
     {"GRID",    "Grid type to which the Sensorbox is connected",      0, 1, GRID},
     {"CAL",     "Calibrate CT1 (CT2+3 will also change)",             (unsigned int) (ICAL * 0.3), (unsigned int) (ICAL * 2.0), ICAL}, // valid range is 0.3 - 2.0 times measured value
@@ -439,10 +457,10 @@ const struct {
     {"START",   "Surplus energy start Current (sum of phases)",       0, 48, START_CURRENT},
     {"STOP",    "Stop solar charging at 6A after this time",          0, 60, STOP_TIME},
     {"IMPORT",  "Allow grid power when solar charging (sum of phase)",0, 20, IMPORT_CURRENT},
-    {"MAINSMET","Type of mains electric meter",                       1, EM_CUSTOM, MAINS_METER},
+    {"MAINSMET","Type of mains electric meter",                       EM_DISABLED, EM_CUSTOM, MAINS_METER},
     {"MAINSADR","Address of mains electric meter",                    MIN_METER_ADDRESS, MAX_METER_ADDRESS, MAINS_METER_ADDRESS},
-    {"MAINSMES","Mains electric meter scope (What does it measure?)", 0, 1, MAINS_METER_MEASURE},
-    {"PV METER","Type of PV electric meter",                          0, EM_CUSTOM, PV_METER},
+    {"MAINSMES","Mains electric meter scope (What does it measure?)", MAINS_METER_MEASURE_MIN, MAINS_METER_MEASURE_MAX, MAINS_METER_MEASURE_DEFAULT},
+    {"PV METER","Type of PV electric meter",                          EM_DISABLED, EM_CUSTOM, PV_METER},
     {"PV ADDR", "Address of PV electric meter",                       MIN_METER_ADDRESS, MAX_METER_ADDRESS, PV_METER_ADDRESS},
     {"BYTE ORD","Byte order of custom electric meter",                0, 3, EMCUSTOM_ENDIANESS},
     {"DATATYPE","Data type of custom electric meter",                 0, MB_DATATYPE_MAX - 1, EMCUSTOM_DATATYPE},

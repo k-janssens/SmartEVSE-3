@@ -58,7 +58,8 @@ struct tm timeinfo;
 AsyncWebServer webServer(80);
 //AsyncWebSocket ws("/ws");           // data to/from webpage
 DNSServer dnsServer;
-String APhostname = "SmartEVSE-" + String( MacId() & 0xffff, 10);           // SmartEVSE access point Name = SmartEVSE-xxxxx
+String SerialStr = String(MacId() & 0xffff, 10);
+String APhostname = "SmartEVSE-" + SerialStr;           // SmartEVSE access point Name = SmartEVSE-xxxxx
 
 ESPAsync_WiFiManager ESPAsync_wifiManager(&webServer, &dnsServer, APhostname.c_str());
 
@@ -91,10 +92,10 @@ uint16_t MaxMains = MAX_MAINS;                                              // M
 uint16_t MaxCurrent = MAX_CURRENT;                                          // Max Charge current (A)
 uint16_t MinCurrent = MIN_CURRENT;                                          // Minimal current the EV is happy with (A)
 uint16_t ICal = ICAL;                                                       // CT calibration value
-uint8_t Mode = MODE;                                                        // EVSE mode (0:Normal / 1:Smart / 2:Solar)
+uint8_t Mode = MODE_DEFAULT;                                                // EVSE mode
 uint8_t Lock = LOCK;                                                        // Cable lock (0:Disable / 1:Solenoid / 2:Motor)
 uint16_t MaxCircuit = MAX_CIRCUIT;                                          // Max current of the EVSE circuit (A)
-uint8_t Config = CONFIG;                                                    // Configuration (0:Socket / 1:Fixed Cable)
+uint8_t Config = CONFIG_DEFAULT;                                            // Configuration
 uint8_t LoadBl = LOADBL;                                                    // Load Balance Setting (0:Disable / 1:Master / 2-8:Node)
 uint8_t Switch = SWITCH;                                                    // External Switch (0:Disable / 1:Access B / 2:Access S / 3:Smart-Solar B / 4:Smart-Solar S)
                                                                             // B=momentary push button, S=toggle switch
@@ -104,7 +105,7 @@ uint16_t StopTime = STOP_TIME;
 uint16_t ImportCurrent = IMPORT_CURRENT;
 uint8_t MainsMeter = MAINS_METER;                                           // Type of Mains electric meter (0: Disabled / Constants EM_*)
 uint8_t MainsMeterAddress = MAINS_METER_ADDRESS;
-uint8_t MainsMeterMeasure = MAINS_METER_MEASURE;                            // What does Mains electric meter measure (0: Mains (Home+EVSE+PV) / 1: Home+EVSE / 2: Home)
+uint8_t MainsMeterMeasure = MAINS_METER_MEASURE_DEFAULT;                    // What does Mains electric meter measure
 uint8_t PVMeter = PV_METER;                                                 // Type of PV electric meter (0: Disabled / Constants EM_*)
 uint8_t PVMeterAddress = PV_METER_ADDRESS;
 uint8_t Grid = GRID;                                                        // Type of Grid connected to Sensorbox (0:4Wire / 1:3Wire )
@@ -531,7 +532,6 @@ uint8_t getErrorId(uint8_t ErrorCode) {
 
 const char * getErrorNameWeb(uint8_t ErrorCode) {
     uint8_t count = 0;
-    const static char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
     count = getErrorId(ErrorCode);
     if(count < 9) return StrErrorNameWeb[count];
     else return "Multiple Errors";
@@ -2677,9 +2677,9 @@ void read_settings(bool write) {
     
     if (preferences.begin("settings", false) == true) {
 
-        Config = preferences.getUChar("Config", CONFIG); 
+        Config = preferences.getUChar("Config", CONFIG_DEFAULT); 
         Lock = preferences.getUChar("Lock", LOCK); 
-        Mode = preferences.getUChar("Mode", MODE); 
+        Mode = preferences.getUChar("Mode", MODE_DEFAULT); 
         LoadBl = preferences.getUChar("LoadBl", LOADBL); 
         MaxMains = preferences.getUShort("MaxMains", MAX_MAINS); 
         MaxCurrent = preferences.getUShort("MaxCurrent", MAX_CURRENT); 
@@ -2696,7 +2696,7 @@ void read_settings(bool write) {
 
         MainsMeter = preferences.getUChar("MainsMeter", MAINS_METER);
         MainsMeterAddress = preferences.getUChar("MainsMAddress",MAINS_METER_ADDRESS);
-        MainsMeterMeasure = preferences.getUChar("MainsMMeasure",MAINS_METER_MEASURE);
+        MainsMeterMeasure = preferences.getUChar("MainsMMeasure",MAINS_METER_MEASURE_DEFAULT);
         PVMeter = preferences.getUChar("PVMeter",PV_METER);
         PVMeterAddress = preferences.getUChar("PVMAddress",PV_METER_ADDRESS);
         EVMeter = preferences.getUChar("EVMeter",EV_METER);
@@ -2980,6 +2980,7 @@ void StartwebServer(void) {
 
         DynamicJsonDocument doc(1024); // https://arduinojson.org/v6/assistant/
         doc["version"] = String(VERSION);
+        doc["serial"] = SerialStr;
         doc["mode"] = mode;
         doc["mode_id"] = modeId;
         doc["car_connected"] = evConnected;

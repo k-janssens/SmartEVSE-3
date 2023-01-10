@@ -3,7 +3,7 @@
 
 sensor:
   - platform: rest
-    resource: http://SmartEVSE-xxxxx.lan/settings
+    resource: http://SmartEVSE-xxxxx.local/settings
     name: smartevse
     scan_interval: 300
     timeout: 20
@@ -142,6 +142,6 @@ switch:
   - platform: command_line
     switches:
       smartevse_mode_switch:
-        command_on: "curl -s -X POST http://SmartEVSE-xxxxx.lan/settings?mode=3 -H 'accept: application/json' -H 'Content-Type: application/json' -d '{}'"
-        command_off: "curl -s -X POST http://SmartEVSE-xxxxx.lan/settings?mode=0 -H 'accept: application/json' -H 'Content-Type: application/json' -d '{}'"
+        command_on: "curl -s -X POST http://SmartEVSE-xxxxx.local/settings?mode=3 -H 'accept: application/json' -H 'Content-Type: application/json' -d '{}'"
+        command_off: "curl -s -X POST http://SmartEVSE-xxxxx.local/settings?mode=0 -H 'accept: application/json' -H 'Content-Type: application/json' -d '{}'"
         value_template: '{{value_json.mode_id == "3"}}'
