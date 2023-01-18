@@ -350,14 +350,15 @@ void GLCD_print_menu(unsigned char y, const char* str) {
  * @param unsigned int Max
  * @return unsigned int Value
  */
-unsigned int MenuNavInt(unsigned char Buttons, unsigned int Value, unsigned int Min, unsigned int Max) {
+unsigned int MenuNavInt(unsigned char Buttons, unsigned int Value, unsigned int Min, unsigned int Max, unsigned int step = 1) {
     if (Buttons == 0x3) {
-        if (Value >= Max) Value = Min;
-        else Value++;
+        Value += step;
+        if (Value > Max) Value = Min;
     } else if (Buttons == 0x6) {
-        if (Value <= Min) Value = Max;
-        else Value--;
+        Value -= step;
+        if (Value < Min || Value > Max) Value = Max; // check >Max because unsigned values
     }
+    Value = step * (Value / step); // Round value to step
 
     return Value;
 }
@@ -472,7 +473,23 @@ void GLCD(void) {
             GLCD_print_buf2(4, (const char *) "CHECK");
             GLCD_print_buf2(6, (const char *) "WIRING");
             return;
-        } else if (ErrorFlags & TEMP_HIGH) {                                    // Temperature reached 65C
+        }
+        else if (ErrorFlags & OUTSIDE_SCHEDULE) {                             // Outside schedule
+            if (!LCDToggle) {
+                GLCD_print_buf2(0, (const char *) "");
+                GLCD_print_buf2(2, (const char *) "WAIT FOR");
+                GLCD_print_buf2(4, (const char *) "SCHEDULE");
+                GLCD_print_buf2(6, (const char *) "");
+            }
+            else {
+                GLCD_print_buf2(0, (const char *) "PRESS");
+                GLCD_print_buf2(2, (const char *) "BUTTON");
+                GLCD_print_buf2(4, (const char *) "TO");
+                GLCD_print_buf2(6, (const char *) "OVERRIDE");
+            }
+            return;
+        }
+        else if (ErrorFlags & TEMP_HIGH) {                                    // Temperature reached 65C
             GLCD_print_buf2(0, (const char *) "HIGH TEMP");
             GLCD_print_buf2(2, (const char *) "ERROR");
             GLCD_print_buf2(4, (const char *) "CHARGING");
@@ -520,7 +537,12 @@ void GLCD(void) {
         if (ErrorFlags & LESS_6A) {
             GLCD_print_buf2(2, (const char *) "WAITING");
             GLCD_print_buf2(4, (const char *) "FOR POWER");
-        } else if (State == STATE_C) {                                          // STATE C
+        } 
+        else if (ErrorFlags & OUTSIDE_SCHEDULE) {
+            GLCD_print_buf2(2, (const char *) "WAIT FOR");
+            GLCD_print_buf2(4, (const char *) "SCHEDULE");
+        } 
+        else if (State == STATE_C) {                                          // STATE C
             
             BacklightTimer = BACKLIGHT;
             
@@ -740,6 +762,20 @@ const char * getMenuItemOption(uint8_t nav) {
     value = getItemValue(nav);
 
     switch (nav) {
+        case MENU_SCHEDULE_ON:
+            {
+                int h = scheduleOn / 60;
+                int m = scheduleOn % 60;
+                sprintf(Str, "%02u:%02u", h, m);
+                return Str;
+            }
+        case MENU_SCHEDULE_OFF:
+            {
+                int h = scheduleOff / 60;
+                int m = scheduleOff % 60;
+                sprintf(Str, "%02u:%02u", h, m);
+                return Str;
+            }
         case MENU_MAX_TEMP:
             sprintf(Str, "%2u C", maxTemp);
             return Str;
@@ -857,6 +893,8 @@ uint8_t getMenuItems (void) {
     }
     MenuItems[m++] = MENU_3F;
     MenuItems[m++] = MENU_MAX_TEMP;
+    MenuItems[m++] = MENU_SCHEDULE_ON;
+    MenuItems[m++] = MENU_SCHEDULE_OFF;
     MenuItems[m++] = MENU_LOADBL;                                               // Load Balance Setting (0:Disable / 1:Master / 2-8:Node)
     if (Mode && LoadBl < 2) {                                                   // ? Mode Smart/Solar and Load Balancing Disabled/Master?
         MenuItems[m++] = MENU_MAINS;                                            // - Max Mains Amps (hard limit, limited by the MAINS connection) (A) (Mode:Smart/Solar)
@@ -937,10 +975,18 @@ void GLCDMenu(uint8_t Buttons) {
         ErrorFlags &= ~RCM_TRIPPED;                                             // Clear RCM error bit, by pressing any button
     }
 
-    if ((LCDNav == 0) && (Buttons == 0x5) && (ButtonRelease == 0)) {            // Button 2 pressed ?
+    if (ErrorFlags & OUTSIDE_SCHEDULE && LCDNav == MENU_ENTER && (ButtonTimer + 2000) < millis()) {
+        // Clear schedule error
+        ErrorFlags &= ~OUTSIDE_SCHEDULE;
+        overrideSchedule = true;
+        ButtonRelease = 1;
+        ButtonTimer = millis();
+    }
+    else if ((LCDNav == 0) && (Buttons == 0x5) && (ButtonRelease == 0)) {            // Button 2 pressed ?
         LCDNav = MENU_ENTER;                                                    // about to enter menu
         ButtonTimer = millis();
     } else if (LCDNav == MENU_ENTER && ((ButtonTimer + 2000) < millis() )) {    // <CONFIG>
+        overrideSchedule = false;
         LCDNav = MENU_CONFIG;                                                   // Main Menu entered
         ButtonRelease = 1;
     } else if ((LCDNav == MENU_ENTER) && (Buttons == 0x7)) {                    // Button 2 released before entering menu?
@@ -965,6 +1011,12 @@ void GLCDMenu(uint8_t Buttons) {
                         do {
                             value = MenuNavInt(Buttons, value, MenuStr[LCDNav].Min, MenuStr[LCDNav].Max);
                         } while (value == EM_SENSORBOX);
+                        setItemValue(LCDNav, value);
+                        break;
+                    case MENU_SCHEDULE_ON:
+                    case MENU_SCHEDULE_OFF:
+                        value = getItemValue(LCDNav);
+                        value = MenuNavInt(Buttons, value, MenuStr[LCDNav].Min, MenuStr[LCDNav].Max, 15);
                         setItemValue(LCDNav, value);
                         break;
                     default:
@@ -1027,8 +1079,14 @@ void GLCDMenu(uint8_t Buttons) {
         if (LCDNav == 1) {
             glcd_clrln(0, 0x00);
             glcd_clrln(1, 0x04);                                                // horizontal line
-            GLCD_print_buf2(2, (const char *) "Hold 2 sec");
-            GLCD_print_buf2(4, (const char *) "for Menu");
+            if (ErrorFlags & OUTSIDE_SCHEDULE) {
+                GLCD_print_buf2(2, (const char *) "Hold 2 sec");
+                GLCD_print_buf2(4, (const char *) "to override");
+            }
+            else {
+                GLCD_print_buf2(2, (const char *) "Hold 2 sec");
+                GLCD_print_buf2(4, (const char *) "for Menu");
+            }
             glcd_clrln(6, 0x10);                                                // horizontal line
             glcd_clrln(7, 0x00);
 

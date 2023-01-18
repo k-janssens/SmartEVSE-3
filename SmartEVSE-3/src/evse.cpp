@@ -81,7 +81,7 @@ struct ModBus MB;          // Used by SmartEVSE fuctions
 
 const char StrStateName[11][10] = {"A", "B", "C", "D", "COMM_B", "COMM_B_OK", "COMM_C", "COMM_C_OK", "Activate", "B1", "C1"};
 const char StrStateNameWeb[11][17] = {"Ready to Charge", "Connected to EV", "Charging", "D", "Request State B", "State B OK", "Request State C", "State C OK", "Activate", "Charging Stopped", "Stop Charging" };
-const char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
+const char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Outwide schedule", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
 
 // Global data
 
@@ -119,6 +119,9 @@ String APpassword = "00000000";
 
 boolean enable3f = USE_3PHASES;
 uint16_t maxTemp = MAX_TEMPERATURE;
+uint16_t scheduleOn = 0;
+uint16_t scheduleOff = 0;
+bool overrideSchedule = false;
 
 int32_t Irms[3]={0, 0, 0};                                                  // Momentary current per Phase (23 = 2.3A) (resolution 100mA)
 int32_t Irms_EV[3]={0, 0, 0};                                               // Momentary current per Phase (23 = 2.3A) (resolution 100mA)
@@ -130,7 +133,7 @@ uint8_t pilot;
 
 uint16_t MaxCapacity;                                                       // Cable limit (A) (limited by the wire in the charge cable, set automatically, or manually if Config=Fixed Cable)
 uint16_t ChargeCurrent;                                                     // Calculated Charge Current (Amps *10)
-uint16_t OverrideCurrent = 0;                                               // Temporary assigned current (Amps *10) (modbus)
+uint16_t OverrideCurrent = 0;                                               // Temporary assigned current (Amps *1) (modbus)
 int16_t Imeasured = 0;                                                      // Max of all Phases (Amps *10) of mains power
 int16_t Imeasured_EV = 0;                                                   // Max of all Phases (Amps *10) of EV power
 int16_t Isum = 0;                                                           // Sum of all measured Phases (Amps *10) (can be negative)
@@ -457,7 +460,7 @@ void ProximityPin() {
     if ((voltage > 500) && (voltage < 700)) MaxCapacity = 32;               // Max cable current = 32A	220R -> should be around 0.6V
     if ((voltage > 200) && (voltage < 400)) MaxCapacity = 63;               // Max cable current = 63A	100R -> should be around 0.3V
 
-    if (Config) MaxCapacity = MaxCurrent;                                   // Override with MaxCurrent when Fixed Cable is used.
+    if (Config) MaxCapacity = (OverrideCurrent ?: MaxCurrent);                                   // Override with MaxCurrent when Fixed Cable is used.
 }
 
 
@@ -523,7 +526,7 @@ uint8_t getErrorId(uint8_t ErrorCode) {
 
 const char * getErrorNameWeb(uint8_t ErrorCode) {
     uint8_t count = 0;
-    const static char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
+    const static char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Outside schedule", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
     count = getErrorId(ErrorCode);
     if(count < 9) return StrErrorNameWeb[count];
     else return "Multiple Errors";
@@ -653,6 +656,32 @@ int getBatteryCurrent(void) {
 }
 
 
+bool IsInchedule(bool allowOverride=true)
+{
+    if (allowOverride && overrideSchedule) {
+        return true;
+    }
+
+    if (scheduleOn == scheduleOff) {
+        return true;
+    }
+    
+    int hm = 60 * timeinfo.tm_hour + timeinfo.tm_min;
+
+    // eg 11-17
+    if (scheduleOff > scheduleOn && hm >= scheduleOn && hm < scheduleOff) {
+        return true;
+    }
+
+    // eg 19-07
+    if (scheduleOff < scheduleOn && (hm >= scheduleOn || hm < scheduleOff)) {
+        return true;
+    }
+
+    return false;
+}
+
+
 // Is there at least 6A(configurable MinCurrent) available for a new EVSE?
 // Look whether there would be place for one more EVSE if we could lower them all down to MinCurrent
 // returns 1 if there is 6A available
@@ -734,11 +763,8 @@ void CalcBalancedCurrent(char mod) {
 
     if (!LoadBl) ResetBalancedStates();                                         // Load balancing disabled?, Reset States
                                                                                 // Do not modify MaxCurrent as it is a config setting. (fix 2.05)
-    if (BalancedState[0] == STATE_C && MaxCurrent > MaxCapacity && !Config) ChargeCurrent = MaxCapacity * 10;
-    else ChargeCurrent = MaxCurrent * 10;                                       // Instead use new variable ChargeCurrent.
-
-    // Override current temporary if set (from Modbus)
-    if (OverrideCurrent) ChargeCurrent = OverrideCurrent;
+    if (BalancedState[0] == STATE_C && (OverrideCurrent ?: MaxCurrent) > MaxCapacity && !Config) ChargeCurrent = MaxCapacity * 10;
+    else ChargeCurrent = (OverrideCurrent ?: MaxCurrent) * 10;                                       // Instead use new variable ChargeCurrent.
 
     if (LoadBl < 2) BalancedMax[0] = ChargeCurrent;                             // Load Balancing Disabled or Master:
                                                                                 // update BalancedMax[0] if the MAX current was adjusted using buttons or CLI
@@ -756,7 +782,7 @@ void CalcBalancedCurrent(char mod) {
         if (Idifference2 < Idifference) {
             Idifference = Idifference2;
         }
-        if (Idifference > 0) IsetBalanced += (Idifference / 4);                 // increase with 1/4th of difference (slowly increase current)
+        if (Idifference > 0) IsetBalanced += max(1, Idifference / 16);          // increase with 1/16th of difference (slowly increase current)
         else IsetBalanced += (Idifference * 100 / TRANSFORMER_COMP);            // last PWM setting + difference (immediately decrease current)
         if (IsetBalanced < 0) IsetBalanced = 0;
         if (IsetBalanced > 800) IsetBalanced = 800;                             // hard limit 80A (added 11-11-2017)
@@ -1038,7 +1064,6 @@ void processAllNodeStates(uint8_t NodeNr) {
 
 }
 
-
 /**
  * Check minimum and maximum of a value and set the variable
  *
@@ -1052,6 +1077,12 @@ uint8_t setItemValue(uint8_t nav, uint16_t val) {
     }
 
     switch (nav) {
+        case MENU_SCHEDULE_ON:
+            scheduleOn = val;
+            break;
+        case MENU_SCHEDULE_OFF:
+            scheduleOff = val;
+            break;
         case MENU_MAX_TEMP:
             maxTemp = val;
             break;
@@ -1216,6 +1247,10 @@ uint8_t setItemValue(uint8_t nav, uint16_t val) {
  */
 uint16_t getItemValue(uint8_t nav) {
     switch (nav) {
+        case MENU_SCHEDULE_ON:
+            return scheduleOn;
+        case MENU_SCHEDULE_OFF:
+            return scheduleOff;
         case MENU_MAX_TEMP:
             return maxTemp;
         case MENU_3F:
@@ -1434,6 +1469,13 @@ void CheckSwitch(void)
                     // Clear RCM error
                     ErrorFlags &= ~RCM_TRIPPED;
                 }
+
+                if (ErrorFlags & OUTSIDE_SCHEDULE) {
+                    // Clear schedule error
+                    ErrorFlags &= ~OUTSIDE_SCHEDULE;
+                    overrideSchedule = true;
+                }
+
                 // Also light up the LCD backlight
                 // BacklightTimer = BACKLIGHT;                                 // Backlight ON
 
@@ -1462,6 +1504,12 @@ void CheckSwitch(void)
                         break;
                     default:
                         break;
+                }
+
+                if (ErrorFlags & OUTSIDE_SCHEDULE) {
+                    // Clear schedule error
+                    ErrorFlags &= ~OUTSIDE_SCHEDULE;
+                    overrideSchedule = true;
                 }
             }
 
@@ -1561,13 +1609,14 @@ void EVSEStates(void * parameter) {
         {
 
             if (pilot == PILOT_12V) {                                           // Check if we are disconnected, or forced to State A, but still connected to the EV
-
                 // If the RFID reader is set to EnableOne mode, and the Charging cable is disconnected
                 // We start a timer to re-lock the EVSE (and unlock the cable) after 60 seconds.
                 if (RFIDReader == 2 && AccessTimer == 0 && Access_bit == 1) AccessTimer = RFIDLOCKTIME;
 
                 if (State != STATE_A) setState(STATE_A);                        // reset state, incase we were stuck in STATE_COMM_B
                 ChargeDelay = 0;                                                // Clear ChargeDelay when disconnected.
+                overrideSchedule = false;                                       // Clear override schedule when disconnected
+                OverrideCurrent = 0;                                            // Reset current override when disconnected
 
                 if (!ResetKwh) ResetKwh = 1;                                    // when set, reset EV kWh meter on state B->C change.
             } else if ( pilot == PILOT_9V && ErrorFlags == NO_ERROR 
@@ -1582,7 +1631,7 @@ void EVSEStates(void * parameter) {
                 _Serialprintf("Cable limit: %uA  Max: %uA\n", MaxCapacity, MaxCurrent);
 #endif
                 if (MaxCurrent > MaxCapacity) ChargeCurrent = MaxCapacity * 10; // Do not modify Max Cable Capacity or MaxCurrent (fix 2.05)
-                else ChargeCurrent = MaxCurrent * 10;                           // Instead use new variable ChargeCurrent
+                else ChargeCurrent = (OverrideCurrent ?: MaxCurrent) * 10;                           // Instead use new variable ChargeCurrent
 
                 // Load Balancing : Node
                 if (LoadBl > 1) {                                               // Send command to Master, followed by Max Charge Current
@@ -1930,6 +1979,11 @@ uint8_t PollEVNode = NR_EVSES;
 
 }
 
+bool IsCarConnected()
+{
+    return (pilot != PILOT_12V);
+}
+
 
 // task 1000msTimer
 void Timer1S(void * parameter) {
@@ -2001,6 +2055,10 @@ void Timer1S(void * parameter) {
             ErrorFlags &= ~TEMP_HIGH; // clear Error
         }
 
+        if (IsInchedule() && (ErrorFlags & OUTSIDE_SCHEDULE)) {                  // Are we in schedule now?
+            ErrorFlags &= ~OUTSIDE_SCHEDULE; // clear Error
+        }
+
         if ( (ErrorFlags & (LESS_6A|NO_SUN) ) && (LoadBl < 2) && (IsCurrentAvailable())) {
             ErrorFlags &= ~LESS_6A;                                         // Clear Errors if there is enough current available, and Load Balancing is disabled or we are Master
             ErrorFlags &= ~NO_SUN;
@@ -2030,6 +2088,15 @@ void Timer1S(void * parameter) {
             if (LoadBl < 2) ModbusWriteSingleRequest(BROADCAST_ADR, 0x0001, ErrorFlags);         
             ResetBalancedStates();
         } else if (timeout) timeout--;
+
+        if (IsCarConnected() && !IsInchedule() && !(ErrorFlags & OUTSIDE_SCHEDULE)) {
+            ErrorFlags |= OUTSIDE_SCHEDULE;
+            setState(STATE_A);
+#ifdef LOG_WARN_EVSE
+            _Serialprintf("Error, outside schedule (%i-%i)\n", (int)scheduleOn, (int)scheduleOff);
+#endif
+            ResetBalancedStates();
+        }
 
         if (TempEVSE > maxTemp && !(ErrorFlags & TEMP_HIGH))                         // Temperature too High?
         {
@@ -2477,7 +2544,7 @@ void ConfigureModbusMode(uint8_t newmode) {
             if (newmode != 255) MBserver.stop();
             _Serialprintf("task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
 
-            MBclient.setTimeout(100);       // timeout 100ms
+            MBclient.setTimeout(250);       // timeout 100ms
             MBclient.onDataHandler(&MBhandleData);
             MBclient.onErrorHandler(&MBhandleError);
 
@@ -2608,6 +2675,8 @@ void read_settings(bool write) {
 
         enable3f = preferences.getUChar("enable3f", false); 
         maxTemp = preferences.getUShort("maxTemp", MAX_TEMPERATURE);
+        scheduleOn = preferences.getUShort("scheduleOn", 0);
+        scheduleOff = preferences.getUShort("scheduleOff", 0);
 
         preferences.end();                                  
 
@@ -2662,6 +2731,8 @@ void write_settings(void) {
 
     preferences.putBool("enable3f", enable3f);
     preferences.putUShort("maxTemp", maxTemp);
+    preferences.putUShort("scheduleOn", scheduleOn);
+    preferences.putUShort("scheduleOff", scheduleOff);
 
     preferences.end();
 
@@ -2837,6 +2908,73 @@ void StartwebServer(void) {
         }
     });
 
+    webServer.on("/overrideSchedule", HTTP_GET, [](AsyncWebServerRequest *request) {
+        overrideSchedule = true;
+
+        String json = "1";
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+        response->addHeader("Access-Control-Allow-Origin","*"); 
+        request->send(response);
+    });
+
+    webServer.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+        static uint8_t forceUpdateCounter = 0;
+        static const int8_t forceUpdateTable[4] = {0, 1, 0, -1};
+        
+        int forceUpdate = forceUpdateTable[(forceUpdateCounter++) & 3];
+        double forceUpdateF = forceUpdate / 100.0;
+
+        String evstate = StrStateNameWeb[State];
+        String error = getErrorNameWeb(ErrorFlags);
+        int errorId = getErrorId(ErrorFlags);
+
+        // if(error == "Waiting for Solar") {
+        if(errorId == 6) {
+            evstate += " - " + error;
+            error = "None";
+            errorId = 0;
+        }
+
+        DynamicJsonDocument doc(1024);
+        doc["version"] = String(VERSION);
+        doc["ts"] = time(NULL);
+
+        JsonObject obj = doc.createNestedObject("status");
+        obj["temperature"] = TempEVSE;
+        obj["state"] = StrStateNameWeb[State];
+        obj["state_id"] = State;
+        obj["error"] = error;
+        obj["error_id"] = errorId;
+        obj["car_connected"] = (pilot != PILOT_12V);
+        bool waiting = (ErrorFlags & (LESS_6A | NO_SUN)) || (State != STATE_C && ChargeDelay > 0);
+        bool charging = (State == STATE_C);
+        obj["car_charging"] = charging;
+        obj["car_needs_charging"] = waiting || charging;
+        obj["waiting_for_power"] = waiting;
+        obj["in_schedule"] = IsInchedule(false);
+        obj["override_schedule"] = overrideSchedule;
+        obj["reset_reason"] = esp_reset_reason();
+        obj["uptime"] = esp_timer_get_time() / 1000000;
+        obj["icharge_max_total"] = charging ? (enable3f ? 3 : 1) * Balanced[0] / 10.0 + forceUpdateF : 0;
+        obj["irms_l1"] = Irms[0] / 10.0 + forceUpdateF;
+        obj["irms_l2"] = Irms[1] / 10.0 + forceUpdateF;
+        obj["irms_l3"] = Irms[2] / 10.0 + forceUpdateF;
+        obj["irms_total"] = (Irms[0] + Irms[1] + Irms[2]) / 10.0;
+        obj["force_update_value"] = forceUpdate;
+        obj["pcharge_max_total"] = charging ? (enable3f ? 3 : 1) * 23 * Balanced[0] + forceUpdate : 0;
+        obj["prms_l1"] = 23 * Irms[0] + forceUpdate;
+        obj["prms_l2"] = 23 * Irms[1] + forceUpdate;
+        obj["prms_l3"] = 23 * Irms[2] + forceUpdate;
+        obj["prms_total"] = 23 * (Irms[0] + Irms[1] + Irms[2]) + forceUpdate;
+
+        String json;
+        serializeJsonPretty(doc, json);
+
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+        response->addHeader("Access-Control-Allow-Origin","*"); 
+        request->send(response);
+    });
+
     webServer.on("/settings", HTTP_GET, [](AsyncWebServerRequest *request) {
         String mode = "N/A";
         int modeId = -1;
@@ -2869,7 +3007,7 @@ void StartwebServer(void) {
 
         boolean evConnected = pilot != PILOT_12V;                    //when access bit = 1, p.ex. in OFF mode, the STATEs are no longer updated
 
-        DynamicJsonDocument doc(1024); // https://arduinojson.org/v6/assistant/
+        DynamicJsonDocument doc(1536); // https://arduinojson.org/v6/assistant/
         doc["version"] = String(VERSION);
         doc["mode"] = mode;
         doc["mode_id"] = modeId;
@@ -2905,6 +3043,25 @@ void StartwebServer(void) {
         doc["evse"]["state_id"] = State;
         doc["evse"]["error"] = error;
         doc["evse"]["error_id"] = errorId;
+
+        doc["schedule"]["in_schedule"] = IsInchedule(false);
+        doc["schedule"]["override_schedule"] = overrideSchedule;
+        doc["schedule"]["on_time_raw"] = scheduleOn;
+        {
+            int h = scheduleOn / 60;
+            int m = scheduleOn % 60;
+            static char tmp[8];
+            sprintf(tmp, "%02u:%02u", h, m);
+            doc["schedule"]["on_time"] = tmp;
+        }
+        doc["schedule"]["off_time_raw"] = scheduleOff;
+        {
+            int h = scheduleOff / 60;
+            int m = scheduleOff % 60;
+            static char tmp[8];
+            sprintf(tmp, "%02u:%02u", h, m);
+            doc["schedule"]["off_time"] = tmp;
+        }
 
         if (RFIDReader) {
             switch(RFIDstatus) {
@@ -2958,7 +3115,7 @@ void StartwebServer(void) {
         doc["backlight"]["status"] = backlight;
 
         String json;
-        serializeJson(doc, json);
+        serializeJsonPretty(doc, json);
 
         AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
         response->addHeader("Access-Control-Allow-Origin","*"); 
@@ -2992,12 +3149,10 @@ void StartwebServer(void) {
                     setMode(MODE_NORMAL);
                     break;
                 case 2:
-                    OverrideCurrent = 0;
                     setAccess(1);
                     setMode(MODE_SOLAR);
                     break;
                 case 3:
-                    OverrideCurrent = 0;
                     setAccess(1);
                     setMode(MODE_SMART);
                     break;
@@ -3032,28 +3187,31 @@ void StartwebServer(void) {
 
         }
 
-        if(Mode == MODE_NORMAL) {
-            if(request->hasParam("override_current")) {
-                String current = request->getParam("override_current")->value();
-                if(current.toInt() >= ( MinCurrent * 10 ) && current.toInt() <= ( MaxCurrent * 10 )) {
-                    OverrideCurrent = current.toInt();
-                    doc["override_current"] = OverrideCurrent;
-                } else {
-                    doc["override_current"] = "Value not allowed!";
+        if(request->hasParam("override_current")) {
+            String current = request->getParam("override_current")->value();
+            int currentInt = current.toInt();
+            //if(currentInt == 0 || (currentInt >= ( MinCurrent * 10 ) && currentInt <= ( MaxCurrent * 10 ))) {
+            if(currentInt == 0 || (currentInt >= 6 && currentInt <= 16 * 10)) {
+                OverrideCurrent = currentInt;
+                if (OverrideCurrent >= 60) {
+                    OverrideCurrent /= 10;
                 }
+                doc["override_current"] = OverrideCurrent;
+            } else {
+                doc["override_current"] = "Value not allowed!";
             }
-
-            // if(request->hasParam("force_contactors")) {
-            //     String force_contactors = request->getParam("force_contactors")->value();
-            //     if(force_contactors.equalsIgnoreCase("true")) {
-            //         setState(State, true);
-            //         doc["force_contactors"] = "OK";
-            //     }
-            // }
         }
 
+        // if(request->hasParam("force_contactors")) {
+        //     String force_contactors = request->getParam("force_contactors")->value();
+        //     if(force_contactors.equalsIgnoreCase("true")) {
+        //         setState(State, true);
+        //         doc["force_contactors"] = "OK";
+        //     }
+        // }
+
         String json;
-        serializeJson(doc, json);
+        serializeJsonPretty(doc, json);
 
         request->send(200, "application/json", json);
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
@@ -3095,7 +3253,7 @@ void StartwebServer(void) {
         }
 
         String json;
-        serializeJson(doc, json);
+        serializeJsonPretty(doc, json);
         request->send(200, "application/json", json);
 
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
@@ -3108,7 +3266,7 @@ void StartwebServer(void) {
         doc["reboot"] = true;
 
         String json;
-        serializeJson(doc, json);
+        serializeJsonPretty(doc, json);
         request->send(200, "application/json", json);
 
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){

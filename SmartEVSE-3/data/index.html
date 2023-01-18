@@ -36,18 +36,15 @@
               initiated = true;
               $('#version').append(data.version);
               
-              let minCurrent=parseInt(data.settings.current_min.toFixed(1));
-              let maxCurrent=parseInt(data.settings.current_max.toFixed(1));
-
               // Initialiaze at page load
-              for(let x = minCurrent ; x <= maxCurrent ; x++) {
+              for(let x = 6 ; x <= 16 ; x++) {
                 $('#mode_override_current').append($('<option>', {
                     value: x,
-                    text: x + 'A'
+                    text: x + 'A',
+                    selected: (x == data.settings.override_current) ? "selected" : undefined,
                 }));
-
-                // $('#mode_override_current').val(maxCurrent);
               }
+              //$('#mode_override_current').val(data.settings.override_current);
             }
 
             for(let x=0; x<=3; x++) {
@@ -64,7 +61,8 @@
             $('#mode').text(data.mode);
             $('#car_connected').text(data.car_connected ? "Yes" : "No");
             $('#state').text(data.evse.state);
-            $('#temp').text(data.evse.temp + " °C / " + data.evse.temp_max + " °C");
+            //$('#temp').text(data.evse.temp + " °C / " + data.evse.temp_max + " °C");
+            $('#temp').text(data.evse.temp + " °C");
             if(data.evse.error != "None") {
               $('#error').text(data.evse.error);
               $('[id=with_errors]').show();
@@ -88,7 +86,7 @@
             $('#charge_current').text((data.settings.charge_current/10).toFixed(1) + " A");
             $('#current_min').text(data.settings.current_min.toFixed(1) + " A");
             $('#current_max').text(data.settings.current_max.toFixed(1) + " A");
-            $('#override_current').text((data.settings.override_current/10).toFixed(1) + " A");
+            $('#override_current').text(data.settings.override_current.toFixed(1) + " A");
             $('#enable_3phases').text(data.settings["3phases_enabled"] ? "Yes" : "No");
 
             $('#battery_current').text((data.home_battery.current/10).toFixed(1) + "A");
@@ -518,21 +516,24 @@
 
                 <script>
                     function activate(mode) {
-                      if(mode == 1) {
                         override_current=$('#mode_override_current').val();
                         $.post( "/settings?mode=" + mode +  "&override_current=" + (override_current * 10));
-                      } else {
-                        $.post( "/settings?mode=" + mode);
-                      }
+                    }
+                    function overrideCurrent() {
+                        override_current=$('#mode_override_current').val();
+                        $.post("/settings?override_current=" + override_current, () => window.location.reload());
+                    }
+                    function overrideSchedule() {
+                        $.get("/overrideSchedule", () => window.location.reload());
                     }
                     function reboot() {
-                        $.post( "/reboot");
+                        $.post("/reboot", () => window.location.reload());
                     }
                     function update() {
-                      window.location.href = "/update";
+                        window.location.href = "/update";
                     }
                     function rawData() {
-                      window.location.href = "/settings";
+                        window.location.href = "/settings";
                     }
                 </script>
 
@@ -559,8 +560,9 @@
                                           Current:
                                         </div>
                                         <div class="col">
-                                          <select id="mode_override_current">
-                                            <option value="0">Ampere</option>
+                                          <select id="mode_override_current" onchange="overrideCurrent()">
+                                            <option value="">Ampere</option>
+                                            <option value="0">Disable override</option>
                                           </select>
                                         </div>
                                     </div>
@@ -569,6 +571,7 @@
                                           Actions:
                                         </div>
                                         <div class="col">
+                                          <button onclick="overrideSchedule()" style="width: 180px; display:inline-block;">Override schedule</button>
                                           <button onclick="reboot()" style="width: 100px; display:inline-block;">Reboot</button>
                                           <button onclick="update()" style="width: 100px; display:inline-block;">Update</button>
                                           <button onclick="rawData()" style="width: 120px; display:inline-block;">Raw Data</button>

@@ -39,14 +39,10 @@
 //#define FAKE_RFID 1
 
 #ifndef VERSION
-#ifdef DEBUG_DISABLED
-#define VERSION "v3serkri-0.00"
-#else
 //please note that this version will only be displayed with the correct time/date if the program is recompiled
 //so the webserver will show correct version if evse.cpp is recompiled
 //the lcd display will show correct version if glcd.cpp is recompiled
-#define VERSION (__TIME__ " @" __DATE__)
-#endif
+#define VERSION "NV-0.42"
 #endif
 
 
@@ -161,7 +157,7 @@ extern RemoteDebug Debug;
 #define RFID_READER 0
 #define WIFI_MODE 0
 #define AP_PASSWORD "00000000"
-#define USE_3PHASES 0
+#define USE_3PHASES 1
 #define MAX_TEMPERATURE 65
 
 
@@ -201,7 +197,8 @@ extern RemoteDebug Debug;
 #define LESS_6A 1
 #define CT_NOCOMM 2
 #define TEMP_HIGH 4
-#define UNUSED 8                                                                // Unused
+//#define UNUSED 8                                                                // Unused
+#define OUTSIDE_SCHEDULE 8
 #define RCM_TRIPPED 16                                                          // RCM tripped. >6mA DC residual current detected.
 #define NO_SUN 32
 #define Test_IO 64
@@ -309,7 +306,9 @@ extern RemoteDebug Debug;
 #define MENU_WIFI 37                                                            // 0x0219: WiFi mode
 #define MENU_3F 38
 #define MENU_MAX_TEMP 39
-#define MENU_EXIT 40
+#define MENU_SCHEDULE_ON 40
+#define MENU_SCHEDULE_OFF 41
+#define MENU_EXIT 42
 
 #define MENU_STATE 50
 
@@ -434,6 +433,9 @@ extern bool LocalTimeSet;
 extern uint8_t MenuItems[MENU_EXIT];
 extern boolean enable3f;
 extern uint16_t maxTemp;
+extern uint16_t scheduleOn;
+extern uint16_t scheduleOff;
+extern bool overrideSchedule;
 extern uint8_t ExternalMaster;
 
 const struct {
@@ -451,8 +453,8 @@ const struct {
     /* Key,    LCD,       Desc,                                                 Min, Max, Default */
     {"CONFIG", "CONFIG",  "Fixed Cable or Type 2 Socket",                       0, 1, CONFIG},
     {"LOCK",   "LOCK",    "Cable locking actuator type",                        0, 2, LOCK},
-    {"MIN",    "MIN",     "MIN Charge Current the EV will accept (per phase)",  6, 16, MIN_CURRENT},
-    {"MAX",    "MAX",     "MAX Charge Current for this EVSE (per phase)",       6, 80, MAX_CURRENT},
+    {"MIN",    "MIN",     "MIN Charge Current the EV will accept (per phase)",  1, 16, MIN_CURRENT},
+    {"MAX",    "MAX",     "MAX Charge Current for this EVSE (per phase)",       1, 80, MAX_CURRENT},
     {"LOADBL", "LOAD BAL","Load Balancing mode for 2-8 SmartEVSEs",             0, NR_EVSES, LOADBL},
     {"SW",     "SWITCH",  "Switch function control on pin SW",                  0, 4, SWITCH},
     {"RCMON",  "RCMON",   "Residual Current Monitor on pin RCM",                0, 1, RC_MON},
@@ -490,6 +492,9 @@ const struct {
     {"WIFI",   "WIFI",    "Connect to WiFi access point",                       0, 2, WIFI_MODE},
     {"EV3P",   "3 PHASE",  "Can EV use 3 phases",                               0, 1, USE_3PHASES},
     {"MXTMP",  "MAX TEMP",  "Maximum temperature for the EVSE module",          40, 75, MAX_TEMPERATURE},
+
+    {"SCHON",  "SCHED ON",  "Schedule on time",                                 0, 24 * 60 - 1, 0},
+    {"SCHOF",  "SCHED OF",  "Schedule off time",                                0, 24 * 60 - 1, 0},
 
     {"EXIT", "EXIT", "EXIT", 0, 0, 0}
 };
