@@ -72,6 +72,7 @@ const unsigned char LCD_Flow [] = {
 0x10, 0x10, 0x10, 0x1C, 0x02, 0x19, 0x24, 0x42, 0x42, 0x24, 0x19, 0x02, 0x1C, 0x10, 0x10, 0x1F
 };
 
+uint8_t LCDpos = 0;
 bool LCDToggle = false;                                                         // Toggle display between two values
 unsigned char LCDText = 0;                                                      // Cycle through text messages
 unsigned int GLCDx, GLCDy;
@@ -124,14 +125,13 @@ void glcd_clrln_buffer(unsigned char ln) {
         GLCDbuf[i+ (ln * 128)] = 0;
     }
 }
-
+*/
 void glcd_clear(void) {
     unsigned char i;
     for (i = 0; i < 8; i++) {
         glcd_clrln(i, 0);
     }
 }
-*/
 
 void GLCD_buffer_clr(void) {
     unsigned char x = 0;
@@ -422,10 +422,11 @@ void GLCD(void) {
 
             GLCD_buffer_clr();
             // When connected to Wifi, display IP and time in top row
+            uint8_t WIFImode = getItemValue(MENU_WIFI);
             if (WIFImode == 1 ) {   // Wifi Enabled
 
                 if (WiFi.status() == WL_CONNECTED) {
-                    sprintf(Str, "%s %i%cC",WiFi.localIP().toString().c_str(), TempEVSE, 0x0C);
+                    sprintf(Str, "%s %i%cC",WiFi.localIP().toString().c_str(), getItemValue(STATUS_TEMP), 0x0C);
                     GLCD_write_buf_str(0,0, Str, GLCD_ALIGN_LEFT);
                     if (LocalTimeSet) sprintf(Str, "%02u:%02u",timeinfo.tm_hour, timeinfo.tm_min);
                     else sprintf(Str, "--:--");
@@ -558,7 +559,7 @@ void GLCD(void) {
                 } else Str[6] = '\0';
                 GLCD_print_buf2(4, Str);
             } else {
-                if (RFIDReader) {
+                if (getItemValue(MENU_RFIDREADER)) {
                     if (RFIDstatus == 7) {
                         GLCD_print_buf2(2, (const char *) "INVALID");
                         GLCD_print_buf2(4, (const char *) "RFID CARD");
@@ -639,7 +640,7 @@ void GLCD(void) {
             } else {
                 sprintfl(Str, "%uA", Balanced[0], 1, 0);
             }
-            GLCD_write_buf_str(127,0, Str, GLCD_ALIGN_RIGHT);
+            GLCD_write_buf_str(127,1, Str, GLCD_ALIGN_RIGHT);
         } else if (State == STATE_A) {
             // Remove line between House and Car
             for (x = 73; x < 96; x++) GLCDbuf[3u * 128u + x] = 0;
@@ -657,7 +658,10 @@ void GLCD(void) {
                 sprintfl(Str, "%dA", Irms[x], 1, 0);
                 GLCD_write_buf_str(46, x, Str, GLCD_ALIGN_RIGHT);               // print to buffer
                 sprintfl(Str, "%dA", Irms_EV[x], 1, 0);
-                GLCD_write_buf_str(90, x, Str, GLCD_ALIGN_RIGHT);               // print to buffer
+                if (Mode == MODE_SOLAR)
+                    GLCD_write_buf_str(100, x, Str, GLCD_ALIGN_RIGHT);          // in Solar mode the sun needs a little more room
+                else
+                    GLCD_write_buf_str(90, x, Str, GLCD_ALIGN_RIGHT);           // print to buffer
             }
         }
         GLCD_sendbuf(0, 4);                                                     // Copy LCD buffer to GLCD
@@ -672,18 +676,30 @@ void GLCD(void) {
                 GLCD_print_buf2(5, (const char *) "WAITING");
             } else GLCD_print_buf2(5, (const char *) "FOR SOLAR");
         } else if (State != STATE_C) {
-            sprintf(Str, "READY %u", ChargeDelay);
-            if (ChargeDelay) {
-                // BacklightTimer = BACKLIGHT;
-            } else Str[5] = '\0';
-            GLCD_print_buf2(5, Str);
+                switch (Switching_To_Single_Phase) {
+                    case FALSE:
+                        sprintf(Str, "READY %u", ChargeDelay);
+                        if (!ChargeDelay) Str[5] = '\0';
+                        break;
+                    case GOING_TO_SWITCH:
+                        sprintf(Str, "3F -> 1F %u", ChargeDelay);
+                        if (!ChargeDelay) Str[7] = '\0';
+                        break;
+                    case AFTER_SWITCH:                                          // never getting here, just preventing compiler warning
+                        break;
+                }
+                GLCD_print_buf2(5, Str);
         } else if (State == STATE_C) {
             switch (LCDText) {
                 default:
                     LCDText = 0;
                     if (Mode != MODE_NORMAL) {
-                        if (Mode == MODE_SOLAR) GLCD_print_buf2(5, (const char *) "SOLAR");
-                        else GLCD_print_buf2(5, (const char *) "SMART");
+                        if (Mode == MODE_SOLAR) sprintf(Str, "SOLAR");
+                            else sprintf(Str, "SMART");
+                        if (Nr_Of_Phases_Charging != 0) {
+                            sprintf(Str+5," %uF", Nr_Of_Phases_Charging);
+                        }
+                        GLCD_print_buf2(5, Str);
                         break;
                     } else LCDText++;
                 case 1:
@@ -757,9 +773,7 @@ const char * getMenuItemOption(uint8_t nav) {
     const static char StrRFIDReader[6][10] = {"Disabled", "EnableAll", "EnableOne", "Learn", "Delete", "DeleteAll"};
     const static char StrWiFi[3][10] = {"Disabled", "Enabled", "SetupWifi"};
 
-		unsigned int value;
-
-    value = getItemValue(nav);
+    unsigned int value = getItemValue(nav);
 
     switch (nav) {
         case MENU_SCHEDULE_ON:
@@ -777,12 +791,12 @@ const char * getMenuItemOption(uint8_t nav) {
                 return Str;
             }
         case MENU_MAX_TEMP:
-            sprintf(Str, "%2u C", maxTemp);
+            sprintf(Str, "%2u C", value);
             return Str;
-        case MENU_3F:
-            return enable3f ? "Yes" : "No";
+        case MENU_C2:
+            return StrEnableC2[value];
         case MENU_CONFIG:
-            if (Config) return StrFixed;
+            if (value) return StrFixed;
             else return StrSocket;
         case MENU_MODE:
             if (Mode == MODE_SMART) return StrSmart;
@@ -807,20 +821,20 @@ const char * getMenuItemOption(uint8_t nav) {
             sprintf(Str, "%2u A", value);
             return Str;
         case MENU_LOCK:
-            if (Lock == 1) return StrSolenoid;
-            else if (Lock == 2) return StrMotor;
+            if (value == 1) return StrSolenoid;
+            else if (value == 2) return StrMotor;
             else return StrDisabled;
         case MENU_SWITCH:
-            return StrSwitch[Switch];
+            return StrSwitch[value];
         case MENU_RCMON:
-            if (RCmon) return StrEnabled;
+            if (value) return StrEnabled;
             else return StrDisabled;
         case MENU_MAINSMETER:
         case MENU_PVMETER:
         case MENU_EVMETER:
             return (const char*)EMConfig[value].Desc;
         case MENU_GRID:
-            return StrGrid[Grid];
+            return StrGrid[value];
         case MENU_MAINSMETERADDRESS:
         case MENU_PVMETERADDRESS:
         case MENU_EVMETERADDRESS:
@@ -832,7 +846,7 @@ const char * getMenuItemOption(uint8_t nav) {
             else sprintf(Str, "%u %X", value, value);
             return Str;
         case MENU_MAINSMETERMEASURE:
-            if (MainsMeterMeasure) return StrMainsHomeEVSE;
+            if (value) return StrMainsHomeEVSE;
             else return StrMainsAll;
         case MENU_EMCUSTOM_ENDIANESS:
             switch(value) {
@@ -861,9 +875,9 @@ const char * getMenuItemOption(uint8_t nav) {
             sprintf(Str, "%lu", pow_10[value]);
             return Str;
         case MENU_RFIDREADER:
-            return StrRFIDReader[RFIDReader];
+            return StrRFIDReader[value];
         case MENU_WIFI:
-            return StrWiFi[WIFImode];
+            return StrWiFi[value];
         case MENU_EXIT:
             return StrExitMenu;
         default:
@@ -882,7 +896,7 @@ uint8_t getMenuItems (void) {
     uint8_t m = 0;
 
     MenuItems[m++] = MENU_CONFIG;                                               // Configuration (0:Socket / 1:Fixed Cable)
-    if (!Config) {                                                              // ? Fixed Cable?
+    if (!getItemValue(MENU_CONFIG)) {                                                              // ? Fixed Cable?
         MenuItems[m++] = MENU_LOCK;                                             // - Cable lock (0:Disable / 1:Solenoid / 2:Motor)
     }
     MenuItems[m++] = MENU_MODE;                                                 // EVSE mode (0:Normal / 1:Smart)
@@ -891,7 +905,6 @@ uint8_t getMenuItems (void) {
         MenuItems[m++] = MENU_STOP;                                             // - Stop time (min)
         MenuItems[m++] = MENU_IMPORT;                                           // - Import Current from Grid (A)
     }
-    MenuItems[m++] = MENU_3F;
     MenuItems[m++] = MENU_MAX_TEMP;
     MenuItems[m++] = MENU_SCHEDULE_ON;
     MenuItems[m++] = MENU_SCHEDULE_OFF;
@@ -902,13 +915,18 @@ uint8_t getMenuItems (void) {
     if (Mode && (LoadBl < 2 || LoadBl == 1)) {                                  // ? Mode Smart/Solar or LoadBl Master?
         MenuItems[m++] = MENU_MIN;                                              // - Minimal current the EV is happy with (A) (Mode:Smart/Solar or LoadBl:Master)
     }
-    if (LoadBl == 1) {                                                          // ? Load balancing Master?
-        MenuItems[m++] = MENU_CIRCUIT;                                          // - Max current of the EVSE circuit (A) (LoadBl:Master)
+    if (LoadBl == 1 || (LoadBl == 0 && Mode != MODE_NORMAL)) {                  // ? Load balancing Master?
+                                                                                // Also, when not in Normal Mode, MaxCircuit will limit
+                                                                                // the total current (subpanel configuration)
+        MenuItems[m++] = MENU_CIRCUIT;                                          // - Max current of the EVSE circuit (A)
     }
+    if (LoadBl == 0)
+        MenuItems[m++] = MENU_C2;
     MenuItems[m++] = MENU_MAX;                                                  // Max Charge current (A)
     MenuItems[m++] = MENU_SWITCH;                                               // External Switch on SW (0:Disable / 1:Access / 2:Smart-Solar)
     MenuItems[m++] = MENU_RCMON;                                                // Residual Current Monitor on RCM (0:Disable / 1:Enable)
     MenuItems[m++] = MENU_RFIDREADER;                                           // RFID Reader connected to SW (0:Disable / 1:Enable / 2:Learn / 3:Delete / 4:Delate All)
+    uint8_t MainsMeter = getItemValue(MENU_MAINSMETER);
     if (Mode) {                                                                 // ? Smart or Solar mode?
         if (LoadBl < 2) {                                                       // - ? Load Balancing Disabled/Master?
             MenuItems[m++] = MENU_MAINSMETER;                                   // - - Type of Mains electric meter (0: Disabled / Constants EM_*)
@@ -918,7 +936,7 @@ uint8_t getMenuItems (void) {
             } else if(MainsMeter) {                                             // - - ? Other?
                 MenuItems[m++] = MENU_MAINSMETERADDRESS;                        // - - - Address of Mains electric meter (5 - 254)
                 MenuItems[m++] = MENU_MAINSMETERMEASURE;                        // - - - What does Mains electric meter measure (0: Mains (Home+EVSE+PV) / 1: Home+EVSE / 2: Home)
-                if (MainsMeterMeasure) {                                        // - - - ? PV not measured by Mains electric meter?
+                if (getItemValue(MENU_MAINSMETERMEASURE)) {                     // - - - ? PV not measured by Mains electric meter?
                     MenuItems[m++] = MENU_PVMETER;                              // - - - - Type of PV electric meter (0: Disabled / Constants EM_*)
                     if (PVMeter) MenuItems[m++] = MENU_PVMETERADDRESS;          // - - - - - Address of PV electric meter (5 - 254)
                 }
@@ -945,6 +963,7 @@ uint8_t getMenuItems (void) {
         }
     }
     MenuItems[m++] = MENU_WIFI;                                                 // Wifi Disabled / Enabled / Portal
+    MenuItems[m++] = MENU_MAX_TEMP;
     MenuItems[m++] = MENU_EXIT;
 
     return m;
@@ -971,7 +990,7 @@ void GLCDMenu(uint8_t Buttons) {
     // Main Menu Navigation
     BacklightTimer = BACKLIGHT;                                                 // delay before LCD backlight turns off.
 
-    if (RCmon == 1 && (ErrorFlags & RCM_TRIPPED) && RCMFAULT == LOW) {          // RCM was tripped, but RCM level is back to normal
+    if (getItemValue(MENU_RCMON) == 1 && (ErrorFlags & RCM_TRIPPED) && RCMFAULT == LOW) {          // RCM was tripped, but RCM level is back to normal
         ErrorFlags &= ~RCM_TRIPPED;                                             // Clear RCM error bit, by pressing any button
     }
 
@@ -1150,6 +1169,7 @@ void GLCD_init(void) {
 
     st7565_command(0x28 | 0x07);                                                // (16) ALL Power Control ON
 
+    glcd_clear();                                                               // clear internal GLCD buffer
     goto_row(0x00);                                                             // (3) Set page address
     goto_col(0x00);                                                             // (4) Set column addr LSB
  

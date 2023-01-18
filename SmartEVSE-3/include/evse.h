@@ -25,44 +25,45 @@
 
 #define __EVSE_MAIN
 
-
-//for wifi-debugging, don't forget to set the debug levels LOG_EVSE_LOG and LOG_MODBUS_LOG before compiling
 //the wifi-debugger is available by telnetting to your SmartEVSE device
-//the on-screen instructions for verbose/warning/info/... do not apply, 
-//the debug messages that are compiled in are always shown for backwards compatibility reasons
-//uncomment for production release, comment this to debug via wifi:
-#define DEBUG_DISABLED 1
+#define DBG 0  //comment or set to 0 for production release, 0 = no debug 1 = debug over telnet, 2 = debug over usb AND telnet
 
 //uncomment this to emulate an rfid reader with rfid of card = 123456
 //showing the rfid card is simulated by executing http://smartevse-xxx.lan/debug?showrfid=1
 //don't forget to first store the card before it can activate charging
 //#define FAKE_RFID 1
 
+//uncomment this to emulate a sunny day where your solar charger is injecting current in the grid:
+//#define FAKE_SUNNY_DAY 1
+//disclaimer: might not work for CT1 calibration/uncalibration stuff, since I can't test that
+//the number of Amperes you want to have fake injected into Lx
+#ifdef FAKE_SUNNY_DAY
+#define INJECT_CURRENT_L1 10
+#define INJECT_CURRENT_L2 0
+#define INJECT_CURRENT_L3 0
+#endif
+
 #ifndef VERSION
 //please note that this version will only be displayed with the correct time/date if the program is recompiled
 //so the webserver will show correct version if evse.cpp is recompiled
 //the lcd display will show correct version if glcd.cpp is recompiled
-#define VERSION "NV-0.42"
+#define VERSION "NV-0.5"
 #endif
 
-
-#define LOG_DEBUG 3                                                             // Debug messages including measurement data
-#define LOG_INFO 2                                                              // Information messages without measurement data
-#define LOG_WARN 1                                                              // Warning or error messages
-#define LOG_OFF 0
-
-#define LOG_EVSE LOG_INFO                                                       // Default: LOG_INFO
-#define LOG_MODBUS LOG_WARN                                                     // Default: LOG_WARN
-
-
-#ifdef DEBUG_DISABLED
-#define _Serialprintf Serial.printf //for standard use of the serial line
-#define _Serialprintln Serial.println //for standard use of the serial line
-#define _Serialprint Serial.print //for standard use of the serial line
+#if DBG == 0
+//used to steer RemoteDebug
+#define DEBUG_DISABLED 1
+#define _LOG_W( ... ) //dummy
+#define _LOG_I( ... ) //dummy
+#define _LOG_D( ... ) //dummy
+#define _LOG_V( ... ) //dummy
+#define _LOG_A( ... ) //dummy
 #else
-#define _Serialprintf rdebugA //for debugging over the serial line
-#define _Serialprintln rdebugA //for debugging over the serial line
-#define _Serialprint rdebugA //for debugging over the serial line
+#define _LOG_W( ... ) rdebugW( __VA_ARGS__ )
+#define _LOG_I( ... ) rdebugI( __VA_ARGS__ )
+#define _LOG_D( ... ) rdebugD( __VA_ARGS__ )
+#define _LOG_V( ... ) rdebugV( __VA_ARGS__ )
+#define _LOG_A( ... ) rdebugA( __VA_ARGS__ )
 #include "RemoteDebug.h"  //https://github.com/JoaoLopesF/RemoteDebug
 extern RemoteDebug Debug;
 #endif
@@ -158,6 +159,7 @@ extern RemoteDebug Debug;
 #define WIFI_MODE 0
 #define AP_PASSWORD "00000000"
 #define USE_3PHASES 1
+#define ENABLE_C2 NOT_PRESENT
 #define MAX_TEMPERATURE 65
 
 
@@ -225,8 +227,8 @@ extern RemoteDebug Debug;
 #define ACTUATOR_OFF { digitalWrite(PIN_ACTB, HIGH); digitalWrite(PIN_ACTA, HIGH); }
 
 #define ONEWIRE_LOW { digitalWrite(PIN_SW_IN, LOW); pinMode(PIN_SW_IN, OUTPUT); }   // SW set to 0, set to output (driven low)
-#define ONEWIRE_HIGH { digitalWrite(PIN_SW_IN, HIGH); pinMode(PIN_SW_IN, OUTPUT); } // SW set to 1, set to output (driven low)
-#define ONEWIRE_FLOATHIGH pinMode(PIN_SW_IN, INPUT);                                // SW input (floating high)
+#define ONEWIRE_HIGH { digitalWrite(PIN_SW_IN, HIGH); pinMode(PIN_SW_IN, OUTPUT); } // SW set to 1, set to output (driven high)
+#define ONEWIRE_FLOATHIGH pinMode(PIN_SW_IN, INPUT_PULLUP );                        // SW input (floating high)
 
 #define RCMFAULT digitalRead(PIN_RCM_FAULT)
 
@@ -304,32 +306,13 @@ extern RemoteDebug Debug;
 #define MENU_EMCUSTOM_EDIVISOR 35                                               // 0x0217: Divisor for Energy (kWh) of custom electric meter (10^x)
 #define MENU_EMCUSTOM_READMAX 36                                                // 0x0218: Maximum register read (ToDo)
 #define MENU_WIFI 37                                                            // 0x0219: WiFi mode
-#define MENU_3F 38
+#define MENU_C2 38
 #define MENU_MAX_TEMP 39
 #define MENU_SCHEDULE_ON 40
 #define MENU_SCHEDULE_OFF 41
 #define MENU_EXIT 42
 
 #define MENU_STATE 50
-
-#if LOG_EVSE >= LOG_DEBUG
-#define LOG_DEBUG_EVSE
-#endif
-#if LOG_EVSE >= LOG_INFO
-#define LOG_INFO_EVSE
-#endif
-#if LOG_EVSE >= LOG_WARN
-#define LOG_WARN_EVSE
-#endif
-#if LOG_MODBUS >= LOG_DEBUG
-#define LOG_DEBUG_MODBUS
-#endif
-#if LOG_MODBUS >= LOG_INFO
-#define LOG_INFO_MODBUS
-#endif
-#if LOG_MODBUS >= LOG_WARN
-#define LOG_WARN_MODBUS
-#endif
 
 #define _RSTB_0 digitalWrite(PIN_LCD_RST, LOW);
 #define _RSTB_1 digitalWrite(PIN_LCD_RST, HIGH);
@@ -367,35 +350,22 @@ extern portMUX_TYPE rtc_spinlock;   //TODO: Will be placed in the appropriate po
 #define RTC_EXIT_CRITICAL()     portEXIT_CRITICAL(&rtc_spinlock)
 
 
-extern String APhostname;
 extern String APpassword;
 extern struct tm timeinfo;
 
 
-extern uint16_t MaxMains;                                                       // Max Mains Amps (hard limit, limited by the MAINS connection)
-extern uint16_t MaxCurrent;                                                     // Max Charge current
-extern uint16_t MinCurrent;                                                     // Minimal current the EV is happy with
 extern uint16_t ICal;                                                           // CT calibration value
 extern uint8_t Mode;                                                            // EVSE mode
-extern uint8_t Lock;                                                            // Cable lock enable/disable
-extern uint16_t MaxCircuit;                                                     // Max current of the EVSE circuit
-extern uint8_t Config;                                                          // Configuration (Fixed Cable or Type 2 Socket)
 extern uint8_t LoadBl;                                                          // Load Balance Setting (Disable, Master or Node)
-extern uint8_t Switch;                                                          // Allow access to EVSE with button on SW
-extern uint8_t RCmon;                                                           // Residual Current monitor
 extern uint8_t Grid;
-extern uint8_t MainsMeter;                                                      // Type of Mains electric meter (0: Disabled / Constants EM_*)
 extern uint8_t MainsMeterAddress;
-extern uint8_t MainsMeterMeasure;                                               // What does Mains electric meter measure (0: Mains (Home+EVSE+PV) / 1: Home+EVSE / 2: Home)
 extern uint8_t PVMeter;                                                         // Type of PV electric meter (0: Disabled / Constants EM_*)
 extern uint8_t PVMeterAddress;
 extern uint8_t EVMeter;                                                         // Type of EV electric meter (0: Disabled / Constants EM_*)
 extern uint8_t EVMeterAddress;
-extern uint8_t RFIDReader;
 #ifdef FAKE_RFID
 extern uint8_t Show_RFID;
 #endif
-extern uint8_t WIFImode;
 
 extern int32_t Irms[3];                                                         // Momentary current per Phase (Amps *10) (23 = 2.3A)
 extern int32_t Irms_EV[3];                                                         // Momentary current per Phase (Amps *10) (23 = 2.3A)
@@ -407,17 +377,14 @@ extern uint8_t NextState;
 extern int16_t Isum;
 extern uint16_t Balanced[NR_EVSES];                                             // Amps value per EVSE
 
-extern uint8_t menu;
 extern uint8_t LCDTimer;
 extern uint16_t BacklightTimer;                                                 // remaining seconds the LCD backlight is active
-extern int8_t TempEVSE;                                                         // Temperature EVSE in deg C (-40 - +125)
 extern uint8_t ButtonState;                                                     // Holds latest push Buttons state (LSB 2:0)
 extern uint8_t OldButtonState;                                                  // Holds previous push Buttons state (LSB 2:0)
 extern uint8_t LCDNav;
 extern uint8_t LCDupdate;
 extern uint8_t SubMenu;
 extern uint32_t ScrollTimer;
-extern uint8_t LCDpos;
 extern uint8_t ChargeDelay;                                                     // Delays charging in seconds.
 extern uint8_t TestState;
 extern uint8_t Access_bit;
@@ -431,72 +398,76 @@ extern uint8_t RFIDstatus;
 extern bool LocalTimeSet;
 
 extern uint8_t MenuItems[MENU_EXIT];
-extern boolean enable3f;
 extern uint16_t maxTemp;
 extern uint16_t scheduleOn;
 extern uint16_t scheduleOff;
 extern bool overrideSchedule;
 extern uint8_t ExternalMaster;
 
+enum EnableC2_t { NOT_PRESENT, ALWAYS_OFF, SOLAR_OFF, ALWAYS_ON, AUTO };
+const static char StrEnableC2[][12] = { "Not present", "Always Off", "Solar Off", "Always On", "Auto" };
+enum Single_Phase_t { FALSE, GOING_TO_SWITCH, AFTER_SWITCH };
+extern Single_Phase_t Switching_To_Single_Phase;
+extern uint8_t Nr_Of_Phases_Charging;
+
 const struct {
-    char Key[8];
     char LCD[9];
     char Desc[52];
     uint16_t Min;
     uint16_t Max;
     uint16_t Default;
 } MenuStr[MENU_EXIT + 1] = {
-    {"", "", "Not in menu", 0, 0, 0},
-    {"", "", "Hold 2 sec", 0, 0, 0},
+    {"", "Not in menu", 0, 0, 0},
+    {"", "Hold 2 sec", 0, 0, 0},
 
     // Node specific configuration
-    /* Key,    LCD,       Desc,                                                 Min, Max, Default */
-    {"CONFIG", "CONFIG",  "Fixed Cable or Type 2 Socket",                       0, 1, CONFIG},
-    {"LOCK",   "LOCK",    "Cable locking actuator type",                        0, 2, LOCK},
-    {"MIN",    "MIN",     "MIN Charge Current the EV will accept (per phase)",  1, 16, MIN_CURRENT},
-    {"MAX",    "MAX",     "MAX Charge Current for this EVSE (per phase)",       1, 80, MAX_CURRENT},
-    {"LOADBL", "LOAD BAL","Load Balancing mode for 2-8 SmartEVSEs",             0, NR_EVSES, LOADBL},
-    {"SW",     "SWITCH",  "Switch function control on pin SW",                  0, 4, SWITCH},
-    {"RCMON",  "RCMON",   "Residual Current Monitor on pin RCM",                0, 1, RC_MON},
-    {"RFID",   "RFID",    "RFID reader, learn/remove cards",                    0, 5, RFID_READER},
-    {"EVEM",   "EV METER","Type of EV electric meter",                          0, EM_CUSTOM, EV_METER},
-    {"EVAD",   "EV ADDR", "Address of EV electric meter",                       MIN_METER_ADDRESS, MAX_METER_ADDRESS, EV_METER_ADDRESS},
+    /* LCD,       Desc,                                                 Min, Max, Default */
+    {"CONFIG",  "Fixed Cable or Type 2 Socket",                       0, 1, CONFIG},
+    {"LOCK",    "Cable locking actuator type",                        0, 2, LOCK},
+    {"MIN",     "MIN Charge Current the EV will accept (per phase)",  1, 16, MIN_CURRENT},
+    {"MAX",     "MAX Charge Current for this EVSE (per phase)",       1, 80, MAX_CURRENT},
+    {"LOAD BAL","Load Balancing mode for 2-8 SmartEVSEs",             0, NR_EVSES, LOADBL},
+    {"SWITCH",  "Switch function control on pin SW",                  0, 4, SWITCH},
+    {"RCMON",   "Residual Current Monitor on pin RCM",                0, 1, RC_MON},
+    {"RFID",    "RFID reader, learn/remove cards",                    0, 5, RFID_READER},
+    {"EV METER","Type of EV electric meter",                          0, EM_CUSTOM, EV_METER},
+    {"EV ADDR", "Address of EV electric meter",                       MIN_METER_ADDRESS, MAX_METER_ADDRESS, EV_METER_ADDRESS},
 
     // System configuration
     /* Key,    LCD,       Desc,                                                 Min, Max, Default */
-    {"MODE",   "MODE",    "Normal, Smart or Solar EVSE mode",                   0, 2, MODE},
-    {"CIRCUIT","CIRCUIT", "EVSE Circuit max Current",                           10, 160, MAX_CIRCUIT},
-    {"GRID",   "GRID",    "Grid type to which the Sensorbox is connected",      0, 1, GRID},
-    {"CAL",    "CAL",     "Calibrate CT1 (CT2+3 will also change)",             (unsigned int) (ICAL * 0.3), (unsigned int) (ICAL * 2.0), ICAL}, // valid range is 0.3 - 2.0 times measured value
-    {"MAINS",  "MAINS",   "Max MAINS Current (per phase)",                      10, 200, MAX_MAINS},
-    {"START",  "START",   "Surplus energy start Current (sum of phases)",       0, 48, START_CURRENT},
-    {"STOP",   "STOP",    "Stop solar charging at 6A after this time",          0, 60, STOP_TIME},
-    {"IMPORT", "IMPORT",  "Allow grid power when solar charging (sum of phase)",0, 20, IMPORT_CURRENT},
-    {"MAINEM", "MAINSMET","Type of mains electric meter",                       1, EM_CUSTOM, MAINS_METER},
-    {"MAINAD", "MAINSADR","Address of mains electric meter",                    MIN_METER_ADDRESS, MAX_METER_ADDRESS, MAINS_METER_ADDRESS},
-    {"MAINM",  "MAINSMES","Mains electric meter scope (What does it measure?)", 0, 1, MAINS_METER_MEASURE},
-    {"PVEM",   "PV METER","Type of PV electric meter",                          0, EM_CUSTOM, PV_METER},
-    {"PVAD",   "PV ADDR", "Address of PV electric meter",                       MIN_METER_ADDRESS, MAX_METER_ADDRESS, PV_METER_ADDRESS},
-    {"EMBO",   "BYTE ORD","Byte order of custom electric meter",                0, 3, EMCUSTOM_ENDIANESS},
-    {"EMDATA", "DATATYPE","Data type of custom electric meter",                 0, MB_DATATYPE_MAX - 1, EMCUSTOM_DATATYPE},
-    {"EMFUNC", "FUNCTION","Modbus Function of custom electric meter",           3, 4, EMCUSTOM_FUNCTION},
-    {"EMUREG", "VOL REGI","Register for Voltage (V) of custom electric meter",  0, 65530, EMCUSTOM_UREGISTER},
-    {"EMUDIV", "VOL DIVI","Divisor for Voltage (V) of custom electric meter",   0, 7, EMCUSTOM_UDIVISOR},
-    {"EMIREG", "CUR REGI","Register for Current (A) of custom electric meter",  0, 65530, EMCUSTOM_IREGISTER},
-    {"EMIDIV", "CUR DIVI","Divisor for Current (A) of custom electric meter",   0, 7, EMCUSTOM_IDIVISOR},
-    {"EMPREG", "POW REGI","Register for Power (W) of custom electric meter",    0, 65534, EMCUSTOM_PREGISTER},
-    {"EMPDIV", "POW DIVI","Divisor for Power (W) of custom electric meter",     0, 7, EMCUSTOM_PDIVISOR},
-    {"EMEREG", "ENE REGI","Register for Energy (kWh) of custom electric meter", 0, 65534, EMCUSTOM_EREGISTER},
-    {"EMEDIV", "ENE DIVI","Divisor for Energy (kWh) of custom electric meter",  0, 7, EMCUSTOM_EDIVISOR},
-    {"EMREAD", "READ MAX","Max register read at once of custom electric meter", 3, 255, 3},
-    {"WIFI",   "WIFI",    "Connect to WiFi access point",                       0, 2, WIFI_MODE},
-    {"EV3P",   "3 PHASE",  "Can EV use 3 phases",                               0, 1, USE_3PHASES},
-    {"MXTMP",  "MAX TEMP",  "Maximum temperature for the EVSE module",          40, 75, MAX_TEMPERATURE},
+    {"MODE",    "Normal, Smart or Solar EVSE mode",                   0, 2, MODE},
+    {"CIRCUIT", "EVSE Circuit max Current",                           10, 160, MAX_CIRCUIT},
+    {"GRID",    "Grid type to which the Sensorbox is connected",      0, 1, GRID},
+    {"CAL",     "Calibrate CT1 (CT2+3 will also change)",             (unsigned int) (ICAL * 0.3), (unsigned int) (ICAL * 2.0), ICAL}, // valid range is 0.3 - 2.0 times measured value
+    {"MAINS",   "Max MAINS Current (per phase)",                      10, 200, MAX_MAINS},
+    {"START",   "Surplus energy start Current (sum of phases)",       0, 48, START_CURRENT},
+    {"STOP",    "Stop solar charging at 6A after this time",          0, 60, STOP_TIME},
+    {"IMPORT",  "Allow grid power when solar charging (sum of phase)",0, 20, IMPORT_CURRENT},
+    {"MAINSMET","Type of mains electric meter",                       1, EM_CUSTOM, MAINS_METER},
+    {"MAINSADR","Address of mains electric meter",                    MIN_METER_ADDRESS, MAX_METER_ADDRESS, MAINS_METER_ADDRESS},
+    {"MAINSMES","Mains electric meter scope (What does it measure?)", 0, 1, MAINS_METER_MEASURE},
+    {"PV METER","Type of PV electric meter",                          0, EM_CUSTOM, PV_METER},
+    {"PV ADDR", "Address of PV electric meter",                       MIN_METER_ADDRESS, MAX_METER_ADDRESS, PV_METER_ADDRESS},
+    {"BYTE ORD","Byte order of custom electric meter",                0, 3, EMCUSTOM_ENDIANESS},
+    {"DATATYPE","Data type of custom electric meter",                 0, MB_DATATYPE_MAX - 1, EMCUSTOM_DATATYPE},
+    {"FUNCTION","Modbus Function of custom electric meter",           3, 4, EMCUSTOM_FUNCTION},
+    {"VOL REGI","Register for Voltage (V) of custom electric meter",  0, 65530, EMCUSTOM_UREGISTER},
+    {"VOL DIVI","Divisor for Voltage (V) of custom electric meter",   0, 7, EMCUSTOM_UDIVISOR},
+    {"CUR REGI","Register for Current (A) of custom electric meter",  0, 65530, EMCUSTOM_IREGISTER},
+    {"CUR DIVI","Divisor for Current (A) of custom electric meter",   0, 7, EMCUSTOM_IDIVISOR},
+    {"POW REGI","Register for Power (W) of custom electric meter",    0, 65534, EMCUSTOM_PREGISTER},
+    {"POW DIVI","Divisor for Power (W) of custom electric meter",     0, 7, EMCUSTOM_PDIVISOR},
+    {"ENE REGI","Register for Energy (kWh) of custom electric meter", 0, 65534, EMCUSTOM_EREGISTER},
+    {"ENE DIVI","Divisor for Energy (kWh) of custom electric meter",  0, 7, EMCUSTOM_EDIVISOR},
+    {"READ MAX","Max register read at once of custom electric meter", 3, 255, 3},
+    {"WIFI",    "Connect to WiFi access point",                       0, 2, WIFI_MODE},
+    {"CONTACT2","Contactor2 (C2) behaviour",                          0, sizeof(StrEnableC2) / sizeof(StrEnableC2[0])-1, ENABLE_C2},
+    {"MAX TEMP","Maximum temperature for the EVSE module",            40, 75, MAX_TEMPERATURE},
 
-    {"SCHON",  "SCHED ON",  "Schedule on time",                                 0, 24 * 60 - 1, 0},
-    {"SCHOF",  "SCHED OF",  "Schedule off time",                                0, 24 * 60 - 1, 0},
+    {"SCHED ON",  "Schedule on time",                                 0, 24 * 60 - 1, 0},
+    {"SCHED OF",  "Schedule off time",                                0, 24 * 60 - 1, 0},
 
-    {"EXIT", "EXIT", "EXIT", 0, 0, 0}
+    {"EXIT", "EXIT", 0, 0, 0}
 };
 
 
@@ -533,7 +504,6 @@ void CheckAPpassword(void);
 void read_settings(bool write);
 void write_settings(void);
 void setSolarStopTimer(uint16_t Timer);
-void setState(uint8_t NewState, boolean forceState);
 void setState(uint8_t NewState);
 void setAccess(bool Access);
 uint8_t setItemValue(uint8_t nav, uint16_t val);
