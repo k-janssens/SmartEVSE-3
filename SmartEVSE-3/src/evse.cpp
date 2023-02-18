@@ -646,16 +646,16 @@ void setState(uint8_t NewState) {
                         Old_Irms[i] = Irms_EV[i];
                         _LOG_D("Trying to detect Charging Phases START Irms_EV[%i]=%u.\n", i, Irms_EV[i]);
                     }
-                    Detecting_Charging_Phases_Timer = 11;                            // we need time for the EV to decide to start charging
+                    Detecting_Charging_Phases_Timer = PHASE_DETECTION_TIME;     // we need time for the EV to decide to start charging
                 }
                 else if (MainsMeter) {                                          // or else MainsMeter will do
-                    SetCurrent(MinCurrent);                                         // for detection of phases we are going to lock the charging current to MinCurrent
+                    SetCurrent(MinCurrent);                                     // for detection of phases we are going to lock the charging current to MinCurrent
                     Current_Lock = true;
                     for (i=0; i<3; i++) {
                         Old_Irms[i] = Irms[i];
                         _LOG_D("Trying to detect Charging Phases START Irms[%i]=%u.\n", i, Irms[i]);
                     }
-                    Detecting_Charging_Phases_Timer = 11;                            // we need time for the EV to decide to start charging
+                    Detecting_Charging_Phases_Timer = PHASE_DETECTION_TIME;     // we need time for the EV to decide to start charging
                 }
             }
             CONTACTOR1_ON;
