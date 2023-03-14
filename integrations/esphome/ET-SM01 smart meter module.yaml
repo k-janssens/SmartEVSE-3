@@ -116,45 +116,6 @@ sensor:
     name: "$human_devicename - Wi-Fi Signal"
     update_interval: 60s
 
-  - platform: pulse_counter
-    pin: D3
-    update_interval : 6s
-    name: "$human_devicename - water pulse"
-    id: water_pulse
-  
-  - platform: pulse_meter
-    pin: D3
-    name: "$human_devicename - Water Pulse Meter"
-    unit_of_measurement: "liter/min"
-    icon: "mdi:water"
-    total:
-      name: "$human_devicename - Water Total"
-      unit_of_measurement: "liter"
-  
-  - platform: pulse_meter
-    pin: D3
-    name: "$human_devicename - Water Pulse Meter"
-    unit_of_measurement: "liter/min"
-    icon: "mdi:water"
-    total:
-      name: "$human_devicename - Water Meter Total"
-      unit_of_measurement: "m³"
-      id: water_meter_total
-      accuracy_decimals: 3
-      device_class: water
-      state_class: total_increasing
-      filters:
-        - multiply: 0.001
-  
-  - platform: template
-    name: "$human_devicename - Water Usage Liter"
-    id: water_flow_rate
-    accuracy_decimals: 1
-    unit_of_measurement: "l/min"
-    icon: "mdi:water"
-    lambda: return (id(water_pulse).state * 10);
-    update_interval: 6s
- 
 text_sensor:
   - platform: dsmr
     identification:
