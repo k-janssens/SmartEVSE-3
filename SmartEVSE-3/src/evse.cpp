@@ -57,7 +57,7 @@ struct tm timeinfo;
 
 AsyncWebServer webServer(80);
 //AsyncWebSocket ws("/ws");           // data to/from webpage
-DNSServer dnsServer;
+AsyncDNSServer dnsServer;
 String APhostname = "SmartEVSE-" + String( MacId() & 0xffff, 10);           // SmartEVSE access point Name = SmartEVSE-xxxxx
 
 ESPAsync_WiFiManager ESPAsync_wifiManager(&webServer, &dnsServer, APhostname.c_str());
@@ -67,8 +67,8 @@ String Router_SSID;
 String Router_Pass;
 
 // Create a ModbusRTU server and client instance on Serial1 
-ModbusServerRTU MBserver(Serial1, 2000, PIN_RS485_DIR);     // TCP timeout set to 2000 ms
-ModbusClientRTU MBclient(Serial1, PIN_RS485_DIR);  
+ModbusServerRTU MBserver(2000, PIN_RS485_DIR);     // TCP timeout set to 2000 ms
+ModbusClientRTU MBclient(PIN_RS485_DIR);
 
 hw_timer_t * timerA = NULL;
 Preferences preferences;
@@ -1453,7 +1453,7 @@ void UpdateCurrentData(void) {
             SetCurrent(Balanced[0]);
         }
         printStatus();  //for debug purposes
-    } else Imeasured = 0; // In case Sensorbox is connected in Normal mode. Clear measurement.
+    }
 }
 
 
@@ -2134,23 +2134,6 @@ void Timer1S(void * parameter) {
         if (Mode == 0)
             printStatus();  //for debug purposes
 
-
-        // this will run every 5 seconds
-        // if (Timer5sec++ >= 5) {
-        //     // Connected to WiFi?
-        //     if (WiFi.status() == WL_CONNECTED) {
-        //         ws.printfAll("T:%d",TempEVSE);                              // Send internal temperature to clients 
-        //         ws.printfAll("S:%s",getStateNameWeb(State));
-        //         ws.printfAll("E:%s",getErrorNameWeb(ErrorFlags));
-        //         ws.printfAll("C:%2.1f",(float)Balanced[0]/10);
-        //         ws.printfAll("I:%3.1f,%3.1f,%3.1f",(float)Irms[0]/10,(float)Irms[1]/10,(float)Irms[2]/10);
-        //         ws.printfAll("R:%u", esp_reset_reason() );
-
-        //         ws.cleanupClients();                                        // Cleanup old websocket clients
-        //     } 
-        //     Timer5sec = 0;
-        // }
-
         //_LOG_A("Task 1s free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
 
 
@@ -2617,14 +2600,14 @@ void ConfigureModbusMode(uint8_t newmode) {
             if (PVMeter) MBserver.registerWorker(PVMeterAddress, ANY_FUNCTION_CODE, &MBPVMeterResponse);
 
             // Start ModbusRTU Node background task
-            MBserver.start();
+            MBserver.begin(Serial1);
 
         } else if (LoadBl < 2 ) {
             // Setup Modbus workers as Master 
             // Stop Node background task (if active)
             _LOG_A("Setup Modbus as Master/Client, stop Server/Node handler\n");
 
-            if (newmode != 255) MBserver.stop();
+            if (newmode != 255) MBserver.end();
             _LOG_A("task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
 
             MBclient.setTimeout(100);       // timeout 100ms
@@ -2632,7 +2615,7 @@ void ConfigureModbusMode(uint8_t newmode) {
             MBclient.onErrorHandler(&MBhandleError);
 
             // Start ModbusRTU Master backgroud task
-            MBclient.begin();
+            MBclient.begin(Serial1);
         } 
     } else if (newmode > 1) {
         // Register worker. at serverID 'LoadBl', all function codes
@@ -2837,54 +2820,6 @@ void write_settings(void) {
     ConfigChanged = 1;
 }
 
-
-/*
-void WiFiStationDisconnected(WiFiEvent_t event, WiFiEventInfo_t info) {
-    _LOG_A("WiFi lost connection.\n");
-    // try to reconnect when not connected to AP
-    if (WiFi.getMode() != WIFI_AP_STA) {                        
-        _LOG_A("Trying to Reconnect\n");
-        WiFi.begin();
-    }
-}
-*/
-
-/*
-void WiFiStationGotIp(WiFiEvent_t event, WiFiEventInfo_t info) {
-    _LOG_A("Connected to AP: %s\nLocal IP: %s\n", WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
-}
-*/
-
-
-
-/*
-//
-// WebSockets event handler
-//
-void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
-
-  if (type == WS_EVT_CONNECT) {
-    _LOG_A("ws[%s][%u] connect\n", server->url(), client->id());
-    //client->printf("Hello Client %u\n", client->id());
-    //client->ping();                                                               // this will crash the ESP on IOS 15.3.1 / Safari
-    //client->text("Hello from ESP32 Server");
-
-  } else if (type == WS_EVT_DISCONNECT) {
-    _LOG_A("ws[%s][%u] disconnect\n", server->url(), client->id());
-  } else if(type == WS_EVT_PONG){
-//   _LOG_A("ws[%s][%u] pong[%u]: %s\n", server->url(), client->id(), len, (len)?(char*)data:"");
-  } else if (type == WS_EVT_DATA){
-
-    _LOG_A("Data received: ");
-    for (int i=0; i < len; i++) {
-      _LOG_A("%c",(char) data[i]);
-    }
-
-    _LOG_A("\nFree: %d\n",ESP.getFreeHeap() );
-  }
-}
-
-*/
 //
 // Replaces %variables% in html file with local variables
 //
@@ -3013,8 +2948,7 @@ void StartwebServer(void) {
         String error = getErrorNameWeb(ErrorFlags);
         int errorId = getErrorId(ErrorFlags);
 
-        // if(error == "Waiting for Solar") {
-        if(errorId == 6) {
+        if (ErrorFlags & NO_SUN) {
             evstate += " - " + error;
             error = "None";
             errorId = 0;
@@ -3154,14 +3088,18 @@ void StartwebServer(void) {
                     setMode(MODE_NORMAL);
                     break;
                 case 2:
-                    OverrideCurrent = 0;
-                    setAccess(1);
-                    setMode(MODE_SOLAR);
-                    break;
+                    if (MainsMeter) {
+                        OverrideCurrent = 0;
+                        setAccess(1);
+                        setMode(MODE_SOLAR);
+                        break;
+                    }
                 case 3:
-                    setAccess(1);
-                    setMode(MODE_SMART);
-                    break;
+                    if (MainsMeter) {
+                        setAccess(1);
+                        setMode(MODE_SMART);
+                        break;
+                    }
                 default:
                     mode = "Value not allowed!";
             }
@@ -3197,14 +3135,6 @@ void StartwebServer(void) {
                     doc["override_current"] = "Value not allowed!";
                 }
             }
-
-            // if(request->hasParam("force_contactors")) {
-            //     String force_contactors = request->getParam("force_contactors")->value();
-            //     if(force_contactors.equalsIgnoreCase("true")) {
-            //         setState(State, true);
-            //         doc["force_contactors"] = "OK";
-            //     }
-            // }
         }
 
         String json;
@@ -3286,10 +3216,6 @@ void StartwebServer(void) {
     // setup 404 handler 'onRequest'
     webServer.onNotFound(onRequest);
 
-    // setup websockets handler 'onWsEvent'
-    // ws.onEvent(onWsEvent);
-    // webServer.addHandler(&ws);
-    
     // Setup async webserver
     webServer.begin();
     _LOG_A("HTTP server started\n");
@@ -3341,12 +3267,6 @@ void WiFiSetup(void) {
     //WiFi.setAutoReconnect(true);
     //WiFi.persistent(true);
     WiFi.onEvent(onWifiEvent);
-
-    // On disconnect Event, call function
-    //WiFi.onEvent(WiFiStationDisconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
-    // On IP, call function
-    //
-    //WiFi.onEvent (WiFiAPstop, SYSTEM_EVENT_AP_STOP);
 
     // Init and get the time
     // See https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv for Timezone codes for your region
@@ -3525,6 +3445,7 @@ void setup() {
     attachInterrupt(PIN_CP_OUT, onCPpulse, RISING);   
    
     // Uart 1 is used for Modbus @ 9600 8N1
+    RTUutils::prepareHardwareSerial(Serial1);
     Serial1.begin(MODBUS_BAUDRATE, SERIAL_8N1, PIN_RS485_RX, PIN_RS485_TX);
 
    
