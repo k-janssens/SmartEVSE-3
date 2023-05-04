@@ -1944,7 +1944,7 @@ uint8_t PollEVNode = NR_EVSES;
                     ModbusRequest++;
                 case 4:                                                         // EV kWh meter, Energy measurement (total charged kWh)
                     // Request Energy if EV meter is configured
-                    if (Node[PollEVNode].EVMeter) {
+                    if (Node[PollEVNode].EVMeter && Node[PollEVNode].EVMeter != EM_API) {
                         _LOG_D("ModbusRequest %u: Request Energy Node %u\n", ModbusRequest, PollEVNode);
                         requestEnergyMeasurement(Node[PollEVNode].EVMeter, Node[PollEVNode].EVAddress, 0);
                         break;
@@ -1952,7 +1952,7 @@ uint8_t PollEVNode = NR_EVSES;
                     ModbusRequest++;
                 case 5:                                                         // EV kWh meter, Power measurement (momentary power in Watt)
                     // Request Power if EV meter is configured
-                    if (Node[PollEVNode].EVMeter) {
+                    if (Node[PollEVNode].EVMeter && Node[PollEVNode].EVMeter != EM_API) {
                         requestMeasurement(Node[PollEVNode].EVMeter, Node[PollEVNode].EVAddress,EMConfig[Node[PollEVNode].EVMeter].PRegister, 1);
                         break;
                     }
@@ -1983,7 +1983,7 @@ uint8_t PollEVNode = NR_EVSES;
                     ModbusRequest = 21;
                 case 20:                                                         // EV kWh meter, Current measurement
                     // Request Current if EV meter is configured
-                    if (EVMeter) {
+                    if (EVMeter && EVMeter != EM_API) {
                         _LOG_D("ModbusRequest %u: Request EVMeter Current Measurement\n", ModbusRequest);
                         requestCurrentMeasurement(EVMeter, EVMeterAddress);
                         break;
@@ -2635,7 +2635,7 @@ void ConfigureModbusMode(uint8_t newmode) {
             MBserver.registerWorker(BROADCAST_ADR, ANY_FUNCTION_CODE, &MBbroadcast);
 
             if (MainsMeter != EM_API) MBserver.registerWorker(MainsMeterAddress, ANY_FUNCTION_CODE, &MBMainsMeterResponse);
-            if (EVMeter) MBserver.registerWorker(EVMeterAddress, ANY_FUNCTION_CODE, &MBEVMeterResponse);
+            if (EVMeter != EM_API) MBserver.registerWorker(EVMeterAddress, ANY_FUNCTION_CODE, &MBEVMeterResponse);
             if (PVMeter) MBserver.registerWorker(PVMeterAddress, ANY_FUNCTION_CODE, &MBPVMeterResponse);
 
             // Start ModbusRTU Node background task
@@ -3276,6 +3276,38 @@ void StartwebServer(void) {
 
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
     });
+
+    webServer.on("/em", HTTP_POST, [](AsyncWebServerRequest *request) {
+        DynamicJsonDocument doc(200);
+
+        if(EVMeter == EM_API) {
+            if(request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3") && request->hasParam("Import") && request->hasParam("Export") && request->hasParam("Power")) {
+
+                Irms_EV[0] = request->getParam("L1")->value().toInt();
+                Irms_EV[1] = request->getParam("L2")->value().toInt();
+                Irms_EV[2] = request->getParam("L3")->value().toInt();
+
+                EV_import_active_energy = request->getParam("Import")->value().toInt();
+                EV_export_active_energy = request->getParam("Export")->value().toInt();
+
+                PowerMeasured = request->getParam("Power")->value().toInt();
+                
+                EnergyEV = EV_import_active_energy - EV_export_active_energy;
+                if (ResetKwh == 2) EnergyMeterStart = EnergyEV;                 // At powerup, set EnergyEV to kwh meter value
+                EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
+
+                if (LoadBl < 2) timeout = 10;    
+
+                UpdateCurrentData();
+            }
+        }
+
+        String json;
+        serializeJson(doc, json);
+        request->send(200, "application/json", json);
+
+    },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+    });    
 
     webServer.on("/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
         DynamicJsonDocument doc(200);
