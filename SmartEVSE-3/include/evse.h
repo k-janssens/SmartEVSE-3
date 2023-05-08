@@ -30,11 +30,14 @@
 #define DBG 0  //comment or set to 0 for production release, 0 = no debug 1 = debug over telnet, 2 = debug over usb AND telnet
 #endif
 
+#ifndef FAKE_RFID
 //uncomment this to emulate an rfid reader with rfid of card = 123456
 //showing the rfid card is simulated by executing http://smartevse-xxx.lan/debug?showrfid=1
 //don't forget to first store the card before it can activate charging
 //#define FAKE_RFID 1
+#endif
 
+#ifndef FAKE_SUNNY_DAY
 //uncomment this to emulate a sunny day where your solar charger is injecting current in the grid:
 //#define FAKE_SUNNY_DAY 1
 //disclaimer: might not work for CT1 calibration/uncalibration stuff, since I can't test that
@@ -43,6 +46,7 @@
 #define INJECT_CURRENT_L1 10
 #define INJECT_CURRENT_L2 0
 #define INJECT_CURRENT_L3 0
+#endif
 #endif
 
 #ifndef VERSION
@@ -161,7 +165,8 @@ extern RemoteDebug Debug;
 #define AP_PASSWORD "00000000"
 #define ENABLE_C2 NOT_PRESENT
 #define MAX_TEMPERATURE 65
-#define STARTTIME 0                                                             // The default StartTime for delayed charged, 0 = not delaying
+#define DELAYEDSTARTTIME 0                                                             // The default StartTime for delayed charged, 0 = not delaying
+#define DELAYEDSTOPTIME 0                                                       // The default StopTime for delayed charged, 0 = not stopping
 
 
 // Mode settings
@@ -441,7 +446,7 @@ const struct {
     {"MAINS",   "Max MAINS Current (per phase)",                      10, 200, MAX_MAINS},
     {"START",   "Surplus energy start Current (sum of phases)",       0, 48, START_CURRENT},
     {"STOP",    "Stop solar charging at 6A after this time",          0, 60, STOP_TIME},
-    {"IMPORT",  "Allow grid power when solar charging (sum of phase)",0, 20, IMPORT_CURRENT},
+    {"IMPORT",  "Allow grid power when solar charging (sum of phase)",0, 48, IMPORT_CURRENT},
     {"MAINSMET","Type of mains electric meter",                       0, EM_CUSTOM, MAINS_METER},
     {"MAINSADR","Address of mains electric meter",                    MIN_METER_ADDRESS, MAX_METER_ADDRESS, MAINS_METER_ADDRESS},
     {"MAINSMES","Mains electric meter scope (What does it measure?)", 0, 1, MAINS_METER_MEASURE},
@@ -496,7 +501,7 @@ struct EMstruct {
 
 extern struct EMstruct EMConfig[EM_CUSTOM + 1];
 
-struct StartTimestruct {
+struct DelayedTimeStruct {
     uint32_t epoch2;        // in case of Delayed Charging the StartTime in epoch2; if zero we are NOT Delayed Charging
                             // epoch2 is the number of seconds since 1/1/2023 00:00 UTC, which equals epoch 1672531200
                             // we avoid using epoch so we don't need expensive 64bits arithmetics with difftime
@@ -506,7 +511,7 @@ struct StartTimestruct {
 
 #define EPOCH2_OFFSET 1672531200
 
-extern struct StartTimestruct StartTime;
+extern struct DelayedTimeStruct DelayedStartTime;
 
 void CheckAPpassword(void);
 void read_settings(bool write);

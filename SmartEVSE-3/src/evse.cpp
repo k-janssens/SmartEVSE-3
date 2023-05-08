@@ -16,7 +16,7 @@
 #include <Logging.h>
 #include <ModbusServerRTU.h>        // Slave/node
 #include <ModbusClientRTU.h>        // Master
-
+#include "ModbusBridgeWiFi.h"       // Modbus TCP bridge
 #include <time.h>
 
 #include <nvs_flash.h>              // nvs initialisation code (can be removed?)
@@ -66,9 +66,10 @@ ESPAsync_WiFiManager ESPAsync_wifiManager(&webServer, &dnsServer, APhostname.c_s
 String Router_SSID;
 String Router_Pass;
 
-// Create a ModbusRTU server and client instance on Serial1 
+// Create a ModbusRTU server, client and bridge instance on Serial1
 ModbusServerRTU MBserver(2000, PIN_RS485_DIR);     // TCP timeout set to 2000 ms
 ModbusClientRTU MBclient(PIN_RS485_DIR);
+ModbusBridgeWiFi MBbridge;
 
 hw_timer_t * timerA = NULL;
 Preferences preferences;
@@ -101,7 +102,9 @@ uint8_t RCmon = RC_MON;                                                     // R
 uint16_t StartCurrent = START_CURRENT;
 uint16_t StopTime = STOP_TIME;
 uint16_t ImportCurrent = IMPORT_CURRENT;
-struct StartTimestruct StartTime;
+struct DelayedTimeStruct DelayedStartTime;
+struct DelayedTimeStruct DelayedStopTime;
+uint8_t DelayedRepeat;                                                      // 0 = no repeat, 1 = daily repeat
 uint8_t MainsMeter = MAINS_METER;                                           // Type of Mains electric meter (0: Disabled / Constants EM_*)
 uint8_t MainsMeterAddress = MAINS_METER_ADDRESS;
 uint8_t MainsMeterMeasure = MAINS_METER_MEASURE;                            // What does Mains electric meter measure (0: Mains (Home+EVSE+PV) / 1: Home+EVSE / 2: Home)
@@ -548,24 +551,31 @@ const char * getErrorNameWeb(uint8_t ErrorCode) {
  * @param uint8_t Mode
  */
 void setMode(uint8_t NewMode) {
+
+    // If mainsmeter disabled we can only run in Normal Mode
+    if (!MainsMeter && NewMode != MODE_NORMAL)
+        return;
+
     // when switching modes, we just keep charging at the phases we were charging at;
     // it's only the regulation algorithm that is changing...
     // EXCEPT when EnableC2 == Solar Off, because we would expect C2 to be off when in Solar Mode and EnableC2 == Solar Off
     // and also the other way around, multiple phases might be wanted when changing from Solar to Normal or Smart
+    bool setAccessLater = false;
     if (EnableC2 == SOLAR_OFF) {
         if ((Mode != MODE_SOLAR && NewMode == MODE_SOLAR) || (Mode == MODE_SOLAR && NewMode != MODE_SOLAR)) {
+            //we are switching from non-solar to solar
+            //since we EnableC2 == SOLAR_OFF C2 is turned On now, and should be turned off
             setAccess(0);                                                       //switch to OFF
-            if (LoadBl == 1) ModbusWriteSingleRequest(BROADCAST_ADR, 0x0003, NewMode);
-            Mode = NewMode;
-            setAccess(1);
+            setAccessLater = true;
+            return;
         }
     }
-    else {
-        if (LoadBl == 1) ModbusWriteSingleRequest(BROADCAST_ADR, 0x0003, NewMode);
-        Mode = NewMode;
-    }
-}
 
+    if (LoadBl == 1) ModbusWriteSingleRequest(BROADCAST_ADR, 0x0003, NewMode);
+    Mode = NewMode;
+    if (setAccessLater)
+        setAccess(1);
+}
 /**
  * Set the solar stop timer
  * 
@@ -2608,7 +2618,17 @@ void MBhandleError(Error error, uint32_t token)
 {
   // ModbusError wraps the error code and provides a readable error message for it
   ModbusError me(error);
-  _LOG_A("Error response: %02X - %s\n", error, (const char *)me);
+  uint8_t address, function;
+  uint16_t reg;
+  address = token >> 24;
+  function = (token >> 16);
+  reg = token & 0xFFFF;
+  if (LoadBl == 1 && address>=2 && address <=8 && function == 4 && reg == 0) {  //master sends out messages to nodes 2-8, if no EVSE is connected with that address
+                                                                                //a timeout will be generated. This is legit!
+    _LOG_V("Error response: %02X - %s, address: %02x, function: %02x, reg: %04x.\n", error, (const char *)me,  address, function, reg);
+  }
+  else
+    _LOG_A("Error response: %02X - %s, address: %02x, function: %02x, reg: %04x.\n", error, (const char *)me,  address, function, reg);
 }
 
 
@@ -2634,7 +2654,8 @@ void ConfigureModbusMode(uint8_t newmode) {
             // Also add handler for all broadcast messages from Master.
             MBserver.registerWorker(BROADCAST_ADR, ANY_FUNCTION_CODE, &MBbroadcast);
 
-            if (MainsMeter != EM_API) MBserver.registerWorker(MainsMeterAddress, ANY_FUNCTION_CODE, &MBMainsMeterResponse);
+
+            if (MainsMeter && MainsMeter != EM_API) MBserver.registerWorker(MainsMeterAddress, ANY_FUNCTION_CODE, &MBMainsMeterResponse);
             if (EVMeter && EVMeter != EM_API) MBserver.registerWorker(EVMeterAddress, ANY_FUNCTION_CODE, &MBEVMeterResponse);
             if (PVMeter) MBserver.registerWorker(PVMeterAddress, ANY_FUNCTION_CODE, &MBPVMeterResponse);
 
@@ -2653,8 +2674,20 @@ void ConfigureModbusMode(uint8_t newmode) {
             MBclient.onDataHandler(&MBhandleData);
             MBclient.onErrorHandler(&MBhandleError);
 
-            // Start ModbusRTU Master backgroud task
+            // Start ModbusRTU Master background task
             MBclient.begin(Serial1);
+            // Modbus TCP bridge
+            // Second address is the RTU slave address that is mapped to the first TCP slave address
+            // TODO not sure if I should create a separate RTUclient for the bridge
+            if (MainsMeter)
+                MBbridge.attachServer(MainsMeterAddress, MainsMeterAddress, ANY_FUNCTION_CODE, &MBclient);
+            if (EVMeter)
+                MBbridge.attachServer(EVMeterAddress, EVMeterAddress, ANY_FUNCTION_CODE, &MBclient);
+            if (PVMeter)
+                MBbridge.attachServer(PVMeterAddress, PVMeterAddress, ANY_FUNCTION_CODE, &MBclient);
+            // Port number 502, maximum of 3 clients in parallel, 10 seconds timeout
+            MBbridge.start(502, 3, 10000);
+
         } 
     } else if (newmode > 1) {
         // Register worker. at serverID 'LoadBl', all function codes
@@ -2780,7 +2813,8 @@ void read_settings(bool write) {
         EMConfig[EM_CUSTOM].Function = preferences.getUChar("EMFunction",EMCUSTOM_FUNCTION);
         WIFImode = preferences.getUChar("WIFImode",WIFI_MODE);
         APpassword = preferences.getString("APpassword",AP_PASSWORD);
-        StartTime.epoch2 = preferences.getULong("StartTime", STARTTIME); //epoch2 is 4 bytes long on arduino
+        DelayedStartTime.epoch2 = preferences.getULong("DelayedStartTime", DELAYEDSTARTTIME); //epoch2 is 4 bytes long on arduino
+        DelayedStopTime.epoch2 = preferences.getULong("DelayedStopTime", DELAYEDSTOPTIME);    //epoch2 is 4 bytes long on arduino
 
         EnableC2 = (EnableC2_t) preferences.getUShort("EnableC2", ENABLE_C2);
         maxTemp = preferences.getUShort("maxTemp", MAX_TEMPERATURE);
@@ -2835,7 +2869,8 @@ void write_settings(void) {
     preferences.putUChar("EMFunction", EMConfig[EM_CUSTOM].Function);
     preferences.putUChar("WIFImode", WIFImode);
     preferences.putString("APpassword", APpassword);
-    preferences.putULong("StartTime", StartTime.epoch2); //epoch2 only needs 4 bytes
+    preferences.putULong("DelayedStartTime", DelayedStartTime.epoch2); //epoch2 only needs 4 bytes
+    preferences.putULong("DelayedStopTime", DelayedStopTime.epoch2);   //epoch2 only needs 4 bytes
 
     preferences.putUShort("EnableC2", EnableC2);
     preferences.putUShort("maxTemp", maxTemp);
@@ -2895,6 +2930,27 @@ void StopwebServer(void) {
     webServer.end();
 }
 
+/* Takes TimeString in format
+ * String = "2023-04-14T11:31"
+ * and store it in the DelayedTimeStruct
+ * returns 0 on success, 1 on failure
+*/
+int StoreTimeString(String DelayedTimeStr, DelayedTimeStruct *DelayedTime) {
+    // Parse the time string
+    tm delayedtime_tm = {};
+    if (strptime(DelayedTimeStr.c_str(), "%Y-%m-%dT%H:%M", &delayedtime_tm)) {
+        delayedtime_tm.tm_isdst = -1;                 //so mktime is going to figure out whether DST is there or not
+        DelayedTime->epoch2 = mktime(&delayedtime_tm) - EPOCH2_OFFSET;
+        // Compare the times
+        time_t now = time(nullptr);             //get current local time
+        DelayedTime->diff = DelayedTime->epoch2 - (mktime(localtime(&now)) - EPOCH2_OFFSET);
+        return 0;
+    }
+    //error TODO not sure whether we keep the old time or reset it to zero?
+    //DelayedTime.epoch2 = 0;
+    //DelayedTime.diff = 0;
+    return 1;
+}
 
 void StartwebServer(void) {
 
@@ -3059,7 +3115,9 @@ void StartwebServer(void) {
         doc["settings"]["solar_stop_time"] = StopTime;
         doc["settings"]["enable_C2"] = StrEnableC2[EnableC2];
         doc["settings"]["mains_meter"] = EMConfig[MainsMeter].Desc;
-        doc["settings"]["starttime"] = (StartTime.epoch2 ? StartTime.epoch2 + EPOCH2_OFFSET : 0);
+        doc["settings"]["starttime"] = (DelayedStartTime.epoch2 ? DelayedStartTime.epoch2 + EPOCH2_OFFSET : 0);
+        doc["settings"]["stoptime"] = (DelayedStopTime.epoch2 ? DelayedStopTime.epoch2 + EPOCH2_OFFSET : 0);
+        doc["settings"]["repeat"] = DelayedRepeat;
         
         doc["home_battery"]["current"] = homeBatteryCurrent;
         doc["home_battery"]["last_update"] = homeBatteryLastUpdate;
@@ -3124,28 +3182,52 @@ void StartwebServer(void) {
 
             //first check if we have a delayed mode switch
             if(request->hasParam("starttime")) {
-                String StartTimeStr = request->getParam("starttime")->value();
+                String DelayedStartTimeStr = request->getParam("starttime")->value();
                 //string time_str = "2023-04-14T11:31";
-
-                // Parse the time string
-                tm starttime_tm = {};
-                if (strptime(StartTimeStr.c_str(), "%Y-%m-%dT%H:%M", &starttime_tm)) {
-                    starttime_tm.tm_isdst = -1;                 //so mktime is going to figure out whether DST is there or not
-                    StartTime.epoch2 = mktime(&starttime_tm) - EPOCH2_OFFSET;
-                    // Compare the times
-                    time_t now = time(nullptr);             //get current local time
-                    StartTime.diff = StartTime.epoch2 - (mktime(localtime(&now)) - EPOCH2_OFFSET);
-                    if (StartTime.diff > 0) {
-                      setAccess(0);                         //switch to OFF, we are Delayed Charging
+                if (!StoreTimeString(DelayedStartTimeStr, &DelayedStartTime)) {
+                    //parse OK
+                    if (DelayedStartTime.diff > 0)
+                        setAccess(0);                         //switch to OFF, we are Delayed Charging
+                    else {//we are in the past so no delayed charging
+                        DelayedStartTime.epoch2 = DELAYEDSTARTTIME;
+                        DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
+                        DelayedRepeat = 0;
                     }
-                    else //we are in the past so no delayed charging
-                        StartTime.epoch2 = STARTTIME;
                 }
-                else
+                else {
                     //we couldn't parse the string, so we are NOT Delayed Charging
-                    StartTime.epoch2 = STARTTIME;
-                //TODO no delayed charging when RFID reader is installed?!?
-                doc["starttime"] = (StartTime.epoch2 ? StartTime.epoch2 + EPOCH2_OFFSET : 0);
+                    DelayedStartTime.epoch2 = DELAYEDSTARTTIME;
+                    DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
+                    DelayedRepeat = 0;
+                }
+
+                // so now we might have a starttime and we might be Delayed Charging
+                if (DelayedStartTime.epoch2) {
+                    //we only accept a DelayedStopTime if we have a valid DelayedStartTime
+                    if(request->hasParam("stoptime")) {
+                        String DelayedStopTimeStr = request->getParam("stoptime")->value();
+                        //string time_str = "2023-04-14T11:31";
+                        if (!StoreTimeString(DelayedStopTimeStr, &DelayedStopTime)) {
+                            //parse OK
+                            if (DelayedStopTime.diff <= 0 || DelayedStopTime.epoch2 <= DelayedStartTime.epoch2)
+                                //we are in the past or DelayedStopTime before DelayedStartTime so no DelayedStopTime
+                                DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
+                        }
+                        else
+                            //we couldn't parse the string, so no DelayedStopTime
+                            DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
+                        doc["stoptime"] = (DelayedStopTime.epoch2 ? DelayedStopTime.epoch2 + EPOCH2_OFFSET : 0);
+                        if(request->hasParam("repeat")) {
+                            int Repeat = request->getParam("repeat")->value().toInt();
+                            if (Repeat >= 0 && Repeat <= 1) {                                   //boundary check
+                                DelayedRepeat = Repeat;
+                                doc["repeat"] = Repeat;
+                            }
+                        }
+                    }
+
+                }
+                doc["starttime"] = (DelayedStartTime.epoch2 ? DelayedStartTime.epoch2 + EPOCH2_OFFSET : 0);
             }
 
             switch(mode.toInt()) {
@@ -3153,26 +3235,31 @@ void StartwebServer(void) {
                     setAccess(0);
                     break;
                 case 1:
-                    setAccess(!StartTime.epoch2);              //if StartTime not zero then we are Delayed Charging
+                    setAccess(!DelayedStartTime.epoch2);              //if DelayedStartTime not zero then we are Delayed Charging
                     setMode(MODE_NORMAL);
                     break;
                 case 2:
                     if (MainsMeter) {
                         OverrideCurrent = 0;
-                        setAccess(!StartTime.epoch2);
+                        setAccess(!DelayedStartTime.epoch2);
                         setMode(MODE_SOLAR);
                         break;
                     }
                 case 3:
                     if (MainsMeter) {
-                        setAccess(!StartTime.epoch2);
+                        setAccess(!DelayedStartTime.epoch2);
                         setMode(MODE_SMART);
                         break;
                     }
                 default:
                     mode = "Value not allowed!";
             }
-            write_settings();
+            if (preferences.begin("settings", false) ) {                        //false = write mode
+                preferences.putUChar("Mode", Mode);
+                preferences.putULong("DelayedStartTime", DelayedStartTime.epoch2); //epoch2 only needs 4 bytes
+                preferences.putULong("DelayedStopTime", DelayedStopTime.epoch2);   //epoch2 only needs 4 bytes
+                preferences.end();
+            }
             doc["mode"] = mode;
         }
 
@@ -3213,6 +3300,7 @@ void StartwebServer(void) {
             if(current.toInt() == 0 || (current.toInt() >= 0 && current.toInt() <= 48)) {
                 StartCurrent = current.toInt();
                 doc["solar_start_current"] = StartCurrent;
+                write_settings();
             } else {
                 doc["solar_start_current"] = "Value not allowed!";
             }
@@ -3220,9 +3308,10 @@ void StartwebServer(void) {
 
         if(request->hasParam("solar_max_import")) {
             String current = request->getParam("solar_max_import")->value();
-            if(current.toInt() == 0 || (current.toInt() >= 0 && current.toInt() <= 20)) {
+            if(current.toInt() == 0 || (current.toInt() >= 0 && current.toInt() <= 48)) {
                 ImportCurrent = current.toInt();
                 doc["solar_max_import"] = ImportCurrent;
+                write_settings();
             } else {
                 doc["solar_max_import"] = "Value not allowed!";
             }
@@ -3685,18 +3774,45 @@ void loop() {
     delay(1000);
 
     // TODO move this to a once a minute loop?
-    if (StartTime.epoch2 && LocalTimeSet) {
+    if (DelayedStartTime.epoch2 && LocalTimeSet) {
         // Compare the times
         time_t now = time(nullptr);             //get current local time
-        StartTime.diff = StartTime.epoch2 - (mktime(localtime(&now)) - EPOCH2_OFFSET);
-        if (StartTime.diff > 0) {
-            if (Access_bit != 0)
+        DelayedStartTime.diff = DelayedStartTime.epoch2 - (mktime(localtime(&now)) - EPOCH2_OFFSET);
+        if (DelayedStartTime.diff > 0) {
+            if (Access_bit != 0 && (DelayedStopTime.epoch2 == 0 || DelayedStopTime.epoch2 > DelayedStartTime.epoch2))
                 setAccess(0);                         //switch to OFF, we are Delayed Charging
         }
         else {
-            //starttime is in the past so we are NOT Delayed Charging
-            StartTime.epoch2 = STARTTIME;
+            //starttime is in the past so we are NOT Delayed Charging, or we are Delayed Charging but the starttime has passed!
+            if (DelayedRepeat == 1)
+                DelayedStartTime.epoch2 += 24 * 3600;                           //add 24 hours so we now have a new starttime
+            else
+                DelayedStartTime.epoch2 = DELAYEDSTARTTIME;
             setAccess(1);
         }
+    }
+    //only update StopTime.diff if starttime has already passed
+    if (DelayedStopTime.epoch2 && LocalTimeSet) {
+        // Compare the times
+        time_t now = time(nullptr);             //get current local time
+        DelayedStopTime.diff = DelayedStopTime.epoch2 - (mktime(localtime(&now)) - EPOCH2_OFFSET);
+        if (DelayedStopTime.diff <= 0) {
+            //DelayedStopTime has passed
+            if (DelayedRepeat == 1)                                         //we are on a daily repetition schedule
+                DelayedStopTime.epoch2 += 24 * 3600;                        //add 24 hours so we now have a new starttime
+            else
+                DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
+            setAccess(0);                         //switch to OFF
+        }
+    }
+
+    // Modbus TCP stuff
+    static uint32_t statusTime = millis();
+    const uint32_t statusInterval(10000);
+
+    // We will be idling around here - all is done in subtasks :D
+    if (millis() - statusTime > statusInterval) {
+      _LOG_A("%d clients running.\n", MBbridge.activeClients());
+      statusTime = millis();
     }
 }

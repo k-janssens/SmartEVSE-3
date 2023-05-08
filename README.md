@@ -133,6 +133,34 @@ Have an idea for the API? Edit it here <a href="https://swagger-editor.serkri.be
 # Integration with Home Assistant
 If you want to integrate your SmartEVSE with Home Asisstant, please have a look at [the SmartEVSE `custom_component` for Home Assistant](https://github.com/dingo35/ha-SmartEVSEv3). This `custom_component` uses the API to share data from the SmartEVSE to Home Assistant, and enables you to set SmartEVSE settings from Home Assistant. You will need firmware version 1.5.2 or higher to use this integration.
 
+# Modbus TCP bridge
+
+Your MainsMeter, EVMeter and PVMeter will present themselves at port 502 of your SmartEVSE, via the modbus-tcp protocol. 
+So this makes it possible for you to use whatever modbus function you want on whatever modbus register you want. 
+The addresses on the tcp modbus are the same addresses as they are on the RTU modbus.
+
+E.g. my MainsMeter is at slave address 0x0a, so this command reads register 70decimal and following:
+mbpoll -a10 -t 3:hex -r 70 -c 10 10.0.0.76
+
+# Simple Timer
+
+There is a simple timer implemented on the webserver, for Delayed Charging.
+* Upon refreshing your webpage, the StartTime field (next to the Mode buttons) will be filled with the current system time.
+* If you press any of the Mode buttons, your charging session will start immediately;
+* If you choose to enter a StartTime that is in the future, a StopTime field will open up;
+  If you leave this to the default value it is considered to be empty; now if you press Normal or Smart mode
+    - the StartTime will be registered,
+    - the mode will switch to OFF,
+    - a charging session will be started at StartTime, at either Normal or Smart mode;
+    - the SmartEVSE will stay on indefinitely.
+  Delayed Charging in Solar mode is not supported, since in Solar mode the sun will decide when charging starts...
+* If you enter a StopTime, a checkbox named "Daily" will open up; if you check this, the startime/stoptime combination will be used on a daily basis,
+  starting on the date you entered at the StartTime.
+* To clear StartTime, StopTime and Repeat, refresh your webpage and choose either Normal or Smart mode.
+* Know bugs:
+    - if your NTP time is not synchronized yet (e.g. after a reboot), results will be unpredictable. WAIT until time is settled.
+    - if your StopTime is AFTER your StartTime+24Hours, untested territories are entered. Please enter values that make sense.
+
 # Building the firmware
 
 * Install platformio-core https://docs.platformio.org/en/latest/core/installation/methods/index.html
