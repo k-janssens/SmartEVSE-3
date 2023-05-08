@@ -3366,28 +3366,31 @@ void StartwebServer(void) {
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
     });
 
-    webServer.on("/em", HTTP_POST, [](AsyncWebServerRequest *request) {
+    webServer.on("/ev_meter", HTTP_POST, [](AsyncWebServerRequest *request) {
         DynamicJsonDocument doc(200);
 
         if(EVMeter == EM_API) {
-            if(request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3") && request->hasParam("Import") && request->hasParam("Export") && request->hasParam("Power")) {
+            if(request->hasParam("L1") && request->hasParam("L2") && request->hasParam("L3")) {
 
                 Irms_EV[0] = request->getParam("L1")->value().toInt();
                 Irms_EV[1] = request->getParam("L2")->value().toInt();
                 Irms_EV[2] = request->getParam("L3")->value().toInt();
 
-                EV_import_active_energy = request->getParam("Import")->value().toInt();
-                EV_export_active_energy = request->getParam("Export")->value().toInt();
+                if (LoadBl < 2) timeout = 10;    
 
-                PowerMeasured = request->getParam("Power")->value().toInt();
+                UpdateCurrentData();
+            }
+
+            if(request->hasParam("import_active_energy") && request->hasParam("export_active_energy") && request->hasParam("import_active_power")) {
+
+                EV_import_active_energy = request->getParam("import_active_energy")->value().toInt();
+                EV_export_active_energy = request->getParam("export_active_energy")->value().toInt();
+
+                PowerMeasured = request->getParam("import_active_power")->value().toInt();
                 
                 EnergyEV = EV_import_active_energy - EV_export_active_energy;
                 if (ResetKwh == 2) EnergyMeterStart = EnergyEV;                 // At powerup, set EnergyEV to kwh meter value
                 EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
-
-                if (LoadBl < 2) timeout = 10;    
-
-                UpdateCurrentData();
             }
         }
 
