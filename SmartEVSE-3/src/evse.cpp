@@ -80,8 +80,8 @@ static esp_adc_cal_characteristics_t * adc_chars_Temperature;
 
 struct ModBus MB;          // Used by SmartEVSE fuctions
 
-const char StrStateName[11][10] = {"A", "B", "C", "D", "COMM_B", "COMM_B_OK", "COMM_C", "COMM_C_OK", "Activate", "B1", "C1"};
-const char StrStateNameWeb[11][17] = {"Ready to Charge", "Connected to EV", "Charging", "D", "Request State B", "State B OK", "Request State C", "State C OK", "Activate", "Charging Stopped", "Stop Charging" };
+const char StrStateName[14][10] = {"A", "B", "C", "D", "COMM_B", "COMM_B_OK", "COMM_C", "COMM_C_OK", "Activate", "B1", "C1", "MODEM1", "MODEM2", "MODEM_OK"};
+const char StrStateNameWeb[14][17] = {"Ready to Charge", "Connected to EV", "Charging", "D", "Request State B", "State B OK", "Request State C", "State C OK", "Activate", "Charging Stopped", "Stop Charging", "Modem Setup", "Modem Request","Modem Done",};
 
 // Global data
 
@@ -92,7 +92,11 @@ uint16_t MaxCurrent = MAX_CURRENT;                                          // M
 uint16_t MinCurrent = MIN_CURRENT;                                          // Minimal current the EV is happy with (A)
 uint16_t ICal = ICAL;                                                       // CT calibration value
 uint8_t Mode = MODE;                                                        // EVSE mode (0:Normal / 1:Smart / 2:Solar)
-uint32_t CurrentPWM = 0;                                                        // EVSE mode (0:Normal / 1:Smart / 2:Solar)
+uint32_t CurrentPWM = 0;                                                    // Current PWM duty cycle value (0 - 1024)
+int8_t InitialSoC = -1;                                                     // State of charge of car
+int8_t FullSoC = -1;                                                        // SoC car considers itself fully charged
+int8_t BulkSoC = -1;                                                        // SoC car believes it's no longer fast charging
+int8_t ComputedSoC = -1;                                                    // Estimated SoC, based on charged kWh
 bool CPDutyOverride = false;
 uint8_t Lock = LOCK;                                                        // Cable lock (0:Disable / 1:Solenoid / 2:Motor)
 uint16_t MaxCircuit = MAX_CIRCUIT;                                          // Max current of the EVSE circuit (A)
@@ -141,6 +145,7 @@ uint8_t State = STATE_A;
 uint8_t ErrorFlags = NO_ERROR;
 uint8_t NextState;
 uint8_t pilot;
+uint8_t prev_pilot;
 
 uint16_t MaxCapacity;                                                       // Cable limit (A) (limited by the wire in the charge cable, set automatically, or manually if Config=Fixed Cable)
 uint16_t ChargeCurrent;                                                     // Calculated Charge Current (Amps *10)
@@ -185,6 +190,11 @@ uint32_t ScrollTimer = 0;
 uint8_t LCDupdate = 0;                                                      // flag to update the LCD every 1000ms
 uint8_t ChargeDelay = 0;                                                    // Delays charging at least 60 seconds in case of not enough current available.
 uint8_t C1Timer = 0;
+uint8_t ModemStage = 0;                                                     // 0: Modem states will be executed when Modem is enabled 1: Modem stages will be skipped, as SoC is already extracted
+int8_t DisconnectTimeCounter = -1;                                          // Count for how long we're disconnected, so we can more reliably throw disconnect event. -1 means counter is disabled
+uint8_t ToModemWaitStateTimer = 0;                                          // Timer used from STATE_MODEM_REQUEST to STATE_MODEM_WAIT
+uint8_t ToModemDoneStateTimer = 0;                                          // Timer used from STATE_MODEM_WAIT to STATE_MODEM_DONE
+uint8_t LeaveModemDoneStateTimer = 0;                                       // Timer used from STATE_MODEM_DONE to other, usually STATE_B
 uint8_t NoCurrent = 0;                                                      // counts overcurrent situations.
 uint8_t TestState = 0;
 uint8_t ModbusRequest = 0;                                                  // Flag to request Modbus information
@@ -384,7 +394,7 @@ void BlinkLed(void * parameter) {
             if (State == STATE_A) {
                 LedPwm = STATE_A_LED_BRIGHTNESS;                                // STATE A, LED on (dimmed)
             
-            } else if (State == STATE_B || State == STATE_B1) {
+            } else if (State == STATE_B || State == STATE_B1 || State == STATE_MODEM_REQUEST || State == STATE_MODEM_WAIT) {
                 LedPwm = STATE_B_LED_BRIGHTNESS;                                // STATE B, LED on (full brightness)
                 LedCount = 128;                                                 // When switching to STATE C, start at full brightness
 
@@ -523,13 +533,13 @@ uint8_t Pilot() {
  * @return uint8_t[] Name
  */
 const char * getStateName(uint8_t StateCode) {
-    if(StateCode < 11) return StrStateName[StateCode];
+    if(StateCode < 14) return StrStateName[StateCode];
     else return "NOSTATE";
 }
 
 
 const char * getStateNameWeb(uint8_t StateCode) {
-    if(StateCode < 11) return StrStateNameWeb[StateCode];
+    if(StateCode < 14) return StrStateNameWeb[StateCode];
     else return "NOSTATE";    
 }
 
@@ -649,10 +659,32 @@ void setState(uint8_t NewState) {
                 Node[0].Phases = 0;
                 Node[0].MinCurrent = 0;                                         // Clear ChargeDelay when disconnected.
             }
+
+            if (DisconnectTimeCounter == -1){
+                DisconnectTimeCounter = 0;                                      // Start counting disconnect time. If longer than 60 seconds, throw DisconnectEvent
+            }
             break;
-        case STATE_B:
+        case STATE_MODEM_REQUEST: // After overriding PWM, and resetting the safe state is 10% PWM. To make sure communication recovers after going to normal, we do this. Ugly and temporary
+            ToModemWaitStateTimer = 5;
+            DisconnectTimeCounter = -1;                                         // Disable Disconnect timer. Car is connected
+            SetCPDuty(1024);
             CONTACTOR1_OFF;
             CONTACTOR2_OFF;
+            break;
+        case STATE_MODEM_WAIT: 
+            SetCPDuty(50);
+            ToModemDoneStateTimer = 60;
+            break;
+        case STATE_MODEM_DONE:  // This state is reached via STATE_MODEM_WAIT after 60s (timeout condition, nothing received) or after REST request (success, shortcut to immediate charging).
+            CP_OFF;
+            DisconnectTimeCounter = -1;                                         // Disable Disconnect timer. Car is connected
+            LeaveModemDoneStateTimer = 5;                                       // Disconnect CP for 5 seconds, restart charging cycle but this time without the modem steps.
+            break;
+        case STATE_B:
+            CP_ON;
+            CONTACTOR1_OFF;
+            CONTACTOR2_OFF;
+            DisconnectTimeCounter = -1;                                         // Disable Disconnect timer. Car is connected
             timerAlarmWrite(timerA, PWM_95, false);                             // Enable Timer alarm, set to diode test (95%)
             SetCurrent(ChargeCurrent);                                          // Enable PWM
             break;      
@@ -684,7 +716,7 @@ void setState(uint8_t NewState) {
                         OverrideCurrent = MinCurrent * 10;                          // for detection of phases we are going to lock the charging current to MinCurrent
                         for (i=0; i<3; i++) {
                             Old_Irms[i] = Irms_EV[i];
-                            _LOG_D("Trying to detect Charging Phases START Irms_EV[%i]=%u.\n", i, Irms_EV[i]);
+                            _LOG_D("Trying to detect Charging Phases START Irms_EV[%i]=%.1f A.\n", i, (float)Irms_EV[i]/10);
                         }
                         Detecting_Charging_Phases_Timer = PHASE_DETECTION_TIME;     // we need time for the EV to decide to start charging
                     }
@@ -693,7 +725,7 @@ void setState(uint8_t NewState) {
                         OverrideCurrent = MinCurrent * 10;                          // for detection of phases we are going to lock the charging current to MinCurrent
                         for (i=0; i<3; i++) {
                             Old_Irms[i] = Irms[i];
-                            _LOG_D("Trying to detect Charging Phases START Irms[%i]=%u.\n", i, Irms[i]);
+                            _LOG_D("Trying to detect Charging Phases START Irms[%i]=%.1f A.\n", i, (float)Irms[i]/10);
                         }
                         Detecting_Charging_Phases_Timer = PHASE_DETECTION_TIME;     // we need time for the EV to decide to start charging
                     }
@@ -731,8 +763,11 @@ void setState(uint8_t NewState) {
 void setAccess(bool Access) {
     Access_bit = Access;
     if (Access == 0) {
+        CP_OFF;
         if (State == STATE_C) setState(STATE_C1);                               // Determine where to switch to.
-        else if (State == STATE_B) setState(STATE_B1);
+        else if (State == STATE_B || State == STATE_MODEM_REQUEST || State == STATE_MODEM_WAIT || State == STATE_MODEM_DONE) setState(STATE_B1);
+    } else{
+        CP_ON;
     }
 }
 
@@ -1452,6 +1487,24 @@ void printStatus(void)
         _LOG_I("L1: %.1f A L2: %.1f A L3: %.1f A Isum: %.1f A\n", (float)Irms[0]/10, (float)Irms[1]/10, (float)Irms[2]/10, (float)Isum/10);
 }
 
+// Recompute State of Charge, in case we have a known initial state of charge
+// This function is called by kWh logic
+void RecomputeSoC(void){
+    if (InitialSoC > 0)
+        ComputedSoC = InitialSoC + (EnergyCharged / 280);
+}
+
+// EV disconnected from charger. Triggered after 60 seconds of disconnect
+// This is done so we can "re-plug" the car in the Modem process without triggering disconnect events
+void DisconnectEvent(void){
+    _LOG_A("EV disconnected for a while. Resetting SoC states");
+    ModemStage = 0; // Enable Modem states again
+    InitialSoC = -1;
+    FullSoC = -1;
+    BulkSoC = -1;
+    ComputedSoC = -1;
+}
+
 /**
  * Update current data after received current measurement
  */
@@ -1689,9 +1742,9 @@ void EVSEStates(void * parameter) {
 
             if (pilot == PILOT_12V) {                                           // Check if we are disconnected, or forced to State A, but still connected to the EV
 
-                // If the RFID reader is set to EnableOne mode, and the Charging cable is disconnected
+                // If the RFID reader is set to EnableOne or EnableAll mode, and the Charging cable is disconnected
                 // We start a timer to re-lock the EVSE (and unlock the cable) after 60 seconds.
-                if (RFIDReader == 2 && AccessTimer == 0 && Access_bit == 1) AccessTimer = RFIDLOCKTIME;
+                if ((RFIDReader == 2 || RFIDReader == 1) && AccessTimer == 0 && Access_bit == 1) AccessTimer = RFIDLOCKTIME;
 
                 if (State != STATE_A) setState(STATE_A);                        // reset state, incase we were stuck in STATE_COMM_B
                 ChargeDelay = 0;                                                // Clear ChargeDelay when disconnected.
@@ -1699,7 +1752,7 @@ void EVSEStates(void * parameter) {
                 if (!ResetKwh) ResetKwh = 1;                                    // when set, reset EV kWh meter on state B->C change.
             } else if ( pilot == PILOT_9V && ErrorFlags == NO_ERROR 
                 && ChargeDelay == 0 && Access_bit
-                && State != STATE_COMM_B) {                                     // switch to State B ?
+                && State != STATE_COMM_B && State != STATE_MODEM_REQUEST && State != STATE_MODEM_WAIT && State != STATE_MODEM_DONE) {                                     // switch to State B ?
                                                                                 // Allow to switch to state C directly if STATE_A_TO_C is set to PILOT_6V (see EVSE.h)
                 DiodeCheck = 0;
 
@@ -1717,7 +1770,11 @@ void EVSEStates(void * parameter) {
                 } else if (IsCurrentAvailable()) {                             
                     BalancedMax[0] = MaxCapacity * 10;
                     Balanced[0] = ChargeCurrent;                                // Set pilot duty cycle to ChargeCurrent (v2.15)
-                    setState(STATE_B);                                          // switch to State B
+                    if (Modem == EXPERIMENT && ModemStage == 0){
+                        setState(STATE_MODEM_REQUEST);
+                    }else{
+                        setState(STATE_B);                                          // switch to State B
+                    }
                     ActivationMode = 30;                                        // Activation mode is triggered if state C is not entered in 30 seconds.
                     AccessTimer = 0;
                 } else if (Mode == MODE_SOLAR) {                                // Not enough power:
@@ -1838,7 +1895,7 @@ void EVSEStates(void * parameter) {
         // update LCD (every 1000ms) when not in the setup menu
         if (LCDupdate) {
             // This is also the ideal place for debug messages that should not be printed every 10ms
-            //_LOG_A("States task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
+            //_LOG_A("EVSEStates task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
             GLCD();
             LCDupdate = 0;
         }    
@@ -2017,12 +2074,12 @@ uint8_t PollEVNode = NR_EVSES;
                     // Request active energy if Mainsmeter is configured
                     if (MainsMeter && MainsMeter != EM_API) {                   // EM_API does not support energy postings
                         energytimer++; //this ticks approx every second?!?
-                        if (energytimer == 30 || Mains_import_active_energy == 0) {
+                        if (energytimer == 30) {
                             _LOG_D("ModbusRequest %u: Request MainsMeter Import Active Energy Measurement\n", ModbusRequest);
                             requestEnergyMeasurement(MainsMeter, MainsMeterAddress, 0);
                             break;
                         }
-                        if (energytimer >= 60 || Mains_export_active_energy == 0) {
+                        if (energytimer >= 60) {
                             _LOG_D("ModbusRequest %u: Request MainsMeter Export Active Energy Measurement\n", ModbusRequest);
                             requestEnergyMeasurement(MainsMeter, MainsMeterAddress, 1);
                             energytimer = 0;
@@ -2040,7 +2097,7 @@ uint8_t PollEVNode = NR_EVSES;
                         if ((State == STATE_B || State == STATE_C) && !CPDutyOverride) SetCurrent(Balanced[0]); // set PWM output for Master
                     }
                     ModbusRequest = 0;
-                    //_LOG_A("Task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
+                    //_LOG_A("Timer100ms task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
                     break;
             } //switch
         }
@@ -2079,6 +2136,42 @@ void Timer1S(void * parameter) {
         // activation Mode is active
         if (ActivationTimer) ActivationTimer--;                             // Decrease ActivationTimer every second.
         
+        if (State == STATE_MODEM_REQUEST){
+            if (ToModemWaitStateTimer) ToModemWaitStateTimer--;
+            else{
+                setState(STATE_MODEM_WAIT);                                         // switch to state Modem 2
+                GLCD();
+            }
+        }
+
+        if (State == STATE_MODEM_WAIT){
+            if (ToModemDoneStateTimer) ToModemDoneStateTimer--;
+            else{
+                setState(STATE_MODEM_DONE); 
+                GLCD();
+            }
+        }
+
+        if (State == STATE_MODEM_DONE){
+            if (LeaveModemDoneStateTimer) LeaveModemDoneStateTimer--;
+            else{
+                // Here's what happens:
+                //  - State STATE_MODEM_DONE set the CP pin off, to reset connection with car. Since some cars don't support AC charging via ISO15118, SoC is extracted via DC. 
+                //  - Negotiation fails between pyPLC and car. Some cars then won't accept charge via AC it seems after, so we just "re-plug" and start charging without the modem communication protocol 
+                //  - State STATE_B will enable CP pin again, if disabled. 
+                // This stage we are now in is just before we enable CP_PIN and resume via STATE_B
+                
+                // So set the correct PWM cycles, as it still might be set to 5% or something.
+                BalancedMax[0] = MaxCapacity * 10;
+                Balanced[0] = ChargeCurrent;                                // Set pilot duty cycle to ChargeCurrent (v2.15)
+
+                setState(STATE_B);                                         // switch to STATE_ACTSTART
+                GLCD();                                                // Re-init LCD (200ms delay)
+            }
+        }
+
+
+
         if (State == STATE_C1) {
             if (C1Timer) C1Timer--;                                         // if the EV does not stop charging in 6 seconds, we will open the contactor.
             else {
@@ -2087,6 +2180,26 @@ void Timer1S(void * parameter) {
                 GLCD_init();                                                // Re-init LCD (200ms delay)
             }
         }
+
+
+        // Normally, the modem is enabled when Modem == Experiment. However, after a succesfull communication has been set up, EVSE will restart communication by replugging car and moving back to state B.
+        // This time, communication is not initiated. When a car is disconnected, we want to enable the modem states again, but using 12V signal is not reliable (we just "replugged" via CP pin, remember).
+        // This counter just enables the state after 60 seconds of success. 
+        if (DisconnectTimeCounter >= 0){
+            DisconnectTimeCounter++;
+        }
+
+        // This state can be triggered manually in mode "OFF" or as physical unplug. 
+        if (DisconnectTimeCounter > 60){
+            pilot = Pilot();
+            if (pilot == PILOT_12V && Access_bit != 0){
+                DisconnectTimeCounter = -1; 
+                DisconnectEvent();
+            } else{ // Run again
+                DisconnectTimeCounter = 0; 
+            }
+        }
+
 
         // once a second, measure temperature
         // range -40 .. +125C
@@ -2183,7 +2296,7 @@ void Timer1S(void * parameter) {
         if (Mode == 0)
             printStatus();  //for debug purposes
 
-        //_LOG_A("Task 1s free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
+        //_LOG_A("Timer1S task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
 
 
         // Autodetect on which phases we are charging
@@ -2197,11 +2310,11 @@ void Timer1S(void * parameter) {
                     if (EVMeter) {
                         //Charging_Prob[i] = 100 * (abs(Irms_EV[i] - Old_Irms[i])) / ChargeCurrent;    //100% means this phase is charging, 0% mwans not charging
                         Charging_Prob[i] = 10 * (abs(Irms_EV[i] - Old_Irms[i])) / MinCurrent;    //100% means this phase is charging, 0% mwans not charging
-                        _LOG_D("Trying to detect Charging Phases END Irms_EV[%i]=%u.\n", i, Irms_EV[i]);
+                        _LOG_D("Trying to detect Charging Phases END Irms_EV[%i]=%.1f A.\n", i, (float)Irms_EV[i]/10);
                     }     //TODO only working in Smart Mode                                                                         //TODO we start charging with ChargeCurrent but in Smart mode this changes to Balanced[0]; how about Solar? generates error 32?
                     else if (MainsMeter) {
                         Charging_Prob[i] = 10 * (abs(Irms[i] - Old_Irms[i])) / MinCurrent;    //100% means this phase is charging, 0% mwans not charging
-                        _LOG_D("Trying to detect Charging Phases END Irms_[%i]=%u.\n", i, Irms[i]);
+                        _LOG_D("Trying to detect Charging Phases END Irms_[%i]=%.1f A.\n", i, (float)Irms[i]/10);
                     }
                     else
                         Charging_Prob[i] = 0;
@@ -2375,6 +2488,7 @@ ModbusMessage MBEVMeterResponse(ModbusMessage request) {
             EnergyEV = EV_import_active_energy - EV_export_active_energy;
             if (ResetKwh == 2) EnergyMeterStart = EnergyEV;                 // At powerup, set EnergyEV to kwh meter value
             EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
+            RecomputeSoC();
         } else if (MB.Register == EMConfig[EVMeter].PRegister) {
             // Power measurement
             PowerMeasured = receivePowerMeasurement(MB.Data, EVMeter);
@@ -2661,7 +2775,7 @@ void ConfigureModbusMode(uint8_t newmode) {
             _LOG_A("Setup MBserver/Node workers, end Master/Client\n");
             // Stop Master background task (if active)
             if (newmode != 255 ) MBclient.end();    
-            _LOG_A("task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
+            _LOG_A("ConfigureModbusMode1 task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
 
             // Register worker. at serverID 'LoadBl', all function codes
             MBserver.registerWorker(LoadBl, ANY_FUNCTION_CODE, &MBNodeRequest);      
@@ -2682,7 +2796,7 @@ void ConfigureModbusMode(uint8_t newmode) {
             _LOG_A("Setup Modbus as Master/Client, stop Server/Node handler\n");
 
             if (newmode != 255) MBserver.end();
-            _LOG_A("task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
+            _LOG_A("ConfigureModbusMode2 task free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
 
             MBclient.setTimeout(100);       // timeout 100ms
             MBclient.onDataHandler(&MBhandleData);
@@ -3069,7 +3183,7 @@ void StartwebServer(void) {
 
         boolean evConnected = pilot != PILOT_12V;                    //when access bit = 1, p.ex. in OFF mode, the STATEs are no longer updated
 
-        DynamicJsonDocument doc(1200); // https://arduinojson.org/v6/assistant/
+        DynamicJsonDocument doc(1400); // https://arduinojson.org/v6/assistant/
         doc["version"] = String(VERSION);
         doc["mode"] = mode;
         doc["mode_id"] = modeId;
@@ -3138,6 +3252,11 @@ void StartwebServer(void) {
         doc["settings"]["stoptime"] = (DelayedStopTime.epoch2 ? DelayedStopTime.epoch2 + EPOCH2_OFFSET : 0);
         doc["settings"]["repeat"] = DelayedRepeat;
         
+        doc["car_modem"]["ev_initial_soc"] = InitialSoC;
+        doc["car_modem"]["ev_full_soc"] = FullSoC;
+        doc["car_modem"]["ev_bulk_soc"] = BulkSoC;
+        doc["car_modem"]["computed_soc"] = ComputedSoC; 
+
         doc["home_battery"]["current"] = homeBatteryCurrent;
         doc["home_battery"]["last_update"] = homeBatteryLastUpdate;
 
@@ -3261,6 +3380,9 @@ void StartwebServer(void) {
 
             switch(mode.toInt()) {
                 case 0: // OFF
+                    ToModemWaitStateTimer = 0;
+                    ToModemDoneStateTimer = 0;
+                    LeaveModemDoneStateTimer = 0;
                     setAccess(0);
                     break;
                 case 1:
@@ -3423,6 +3545,7 @@ void StartwebServer(void) {
                 EnergyEV = EV_import_active_energy - EV_export_active_energy;
                 if (ResetKwh == 2) EnergyMeterStart = EnergyEV;                 // At powerup, set EnergyEV to kwh meter value
                 EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
+                RecomputeSoC();
             }
         }
 
@@ -3452,10 +3575,15 @@ void StartwebServer(void) {
         //special section to post stuff for experimenting with an ISO15118 modem
         if(request->hasParam("pwm")) {
             int pwm = request->getParam("pwm")->value().toInt();
-            if (pwm < 0){
+            if (pwm == 0){
+                CP_OFF;
+                CPDutyOverride = true;
+            } else if (pwm < 0){
+                CP_ON;
                 CPDutyOverride = false;
                 pwm = 100; // 10% until next loop, to be safe, corresponds to 6A
             }else{
+                CP_ON;
                 CPDutyOverride = true;
             }
             SetCPDuty(pwm);
@@ -3466,6 +3594,39 @@ void StartwebServer(void) {
             request->send(200, "application/json", json);
 
         }
+
+        //State of charge posting
+        if(request->hasParam("remaining_soc")) {
+            int remaining_soc = request->getParam("remaining_soc")->value().toInt();
+            int full_soc = request->getParam("full_soc")->value().toInt();
+            int bulk_soc = request->getParam("bulk_soc")->value().toInt();
+
+            InitialSoC = remaining_soc;
+
+            if (full_soc >= FullSoC) // Only update if we received it, since sometimes it's there, sometimes it's not
+                FullSoC = full_soc;
+            if (bulk_soc >= BulkSoC) // Only update if we received it, since sometimes it's there, sometimes it's not
+                BulkSoC = bulk_soc;
+
+            if (remaining_soc >= 0 && remaining_soc <= 100){
+                // Skip waiting, charge since we have what we've got
+                if (State == STATE_MODEM_REQUEST || State == STATE_MODEM_WAIT || State == STATE_MODEM_DONE){
+                    _LOG_A("Received SoC via REST. Shortcut to State Modem Done\n");
+                    ModemStage = 1;
+                    setState(STATE_MODEM_DONE); // Go to State B, which means in this case setting PWM
+                }
+            }
+
+            doc["ev_remaining_soc"] = remaining_soc;
+            doc["ev_full_soc"] = full_soc;
+            doc["ev_bulk_soc"] = bulk_soc;
+
+            String json;
+            serializeJson(doc, json);
+            request->send(200, "application/json", json);
+
+        }
+
     });
 
 #ifdef FAKE_RFID
@@ -3520,10 +3681,6 @@ void WiFiSetup(void) {
     ESPAsync_wifiManager.setDebugOutput(true);
     ESPAsync_wifiManager.setMinimumSignalQuality(-1);
     // Set config portal channel, default = 1. Use 0 => random channel from 1-13
-    ESPAsync_wifiManager.setConfigPortalChannel(0);
-    ESPAsync_wifiManager.setAPStaticIPConfig(IPAddress(192,168,4,1), IPAddress(192,168,4,1), IPAddress(255,255,255,0));
-
-    ESPAsync_wifiManager.setConfigPortalTimeout(120);   // Portal will be available 2 minutes to connect to, then close. (if connected within this time, it will remain active)
 
     // Start the mDNS responder so that the SmartEVSE can be accessed using a local hostame: http://SmartEVSE-xxxxxx.local
     if (!MDNS.begin(APhostname.c_str())) {                
@@ -3555,31 +3712,42 @@ void WiFiSetup(void) {
     Debug.setSerialEnabled(true); // if you wants serial echo - only recommended if ESP is plugged in USB
 #endif
 #endif
+    handleWIFImode();                                                           //go into the mode that was saved in nonvolatile memory
+    StartwebServer();
 }
 
+void SetupPortalTask(void * parameter) {
+    _LOG_A("Start Portal...\n");
+    StopwebServer();
+    WiFi.disconnect(true);
+    ESPAsync_wifiManager.setConfigPortalChannel(0);
+    ESPAsync_wifiManager.setAPStaticIPConfig(IPAddress(192,168,4,1), IPAddress(192,168,4,1), IPAddress(255,255,255,0));
 
-void SetupNetworkTask(void * parameter) {
+    ESPAsync_wifiManager.setConfigPortalTimeout(120);   // Portal will be available 2 minutes to connect to, then close. (if connected within this time, it will remain active)
+    delay(1000);
+    ESPAsync_wifiManager.startConfigPortal(APhostname.c_str(), APpassword.c_str());         // blocking until connected or timeout.
+    //_LOG_A("SetupPortalTask free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
+    WiFi.disconnect(true);
+    WIFImode = 1;
+    handleWIFImode();
+    write_settings();
+    LCDNav = 0;
+    StartwebServer();                                                           //restart webserver
+    vTaskDelete(NULL);                                                          //end this task so it will not take up resources
+}
 
-  WiFiSetup();
-  StartwebServer();
+void handleWIFImode() {
 
-  while(1) {
-
-    // retrieve time from NTP server
-    LocalTimeSet = getLocalTime(&timeinfo, 1000U);
-    
-    // Cleanup old websocket clients
-    // ws.cleanupClients();
-
-    if (WIFImode == 2 && LCDTimer > 10 && WiFi.getMode() != WIFI_AP_STA) {
-        _LOG_A("Start Portal...\n");
-        StopwebServer();
-        ESPAsync_wifiManager.startConfigPortal(APhostname.c_str(), APpassword.c_str());         // blocking until connected or timeout.
-        WIFImode = 1;
-        write_settings();
-        LCDNav = 0;
-        StartwebServer();       //restart webserver
-    }
+    if (WIFImode == 2 && WiFi.getMode() != WIFI_AP_STA)
+        //now start the portal in the background, so other tasks keep running
+        xTaskCreate(
+            SetupPortalTask,     // Function that should be called
+            "SetupPortalTask",   // Name of the task (for debugging)
+            10000,                // Stack size (bytes)                              // printf needs atleast 1kb
+            NULL,                 // Parameter to pass
+            1,                    // Task priority
+            NULL                  // Task handleCTReceive
+        );
 
     if (WIFImode == 1 && WiFi.getMode() == WIFI_OFF) {
         _LOG_A("Starting WiFi..\n");
@@ -3591,15 +3759,6 @@ void SetupNetworkTask(void * parameter) {
         _LOG_A("Stopping WiFi..\n");
         WiFi.disconnect(true);
     }    
-
-#ifndef DEBUG_DISABLED
-    // Remote debug over WiFi
-    Debug.handle();
-#endif
-
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-  } // while(1)
-
 }
 
 
@@ -3633,10 +3792,10 @@ void setup() {
     digitalWrite(PIN_LEDB, LOW);
     digitalWrite(PIN_ACTA, LOW);
     digitalWrite(PIN_ACTB, LOW);        
-    digitalWrite(PIN_CPOFF, LOW);           // CP signal ACTIVE
     digitalWrite(PIN_SSR, LOW);             // SSR1 OFF
     digitalWrite(PIN_SSR2, LOW);            // SSR2 OFF
     digitalWrite(PIN_LCD_LED, HIGH);        // LCD Backlight ON
+    CP_OFF;           // CP signal OFF
 
  
     // Uart 0 debug/program port
@@ -3769,7 +3928,7 @@ void setup() {
         "EVSEStates",   // Name of the task (for debugging)
         4096,           // Stack size (bytes)                              // printf needs atleast 1kb
         NULL,           // Parameter to pass
-        1,              // Task priority
+        5,              // Task priority - high
         NULL            // Task handle
     );
 
@@ -3779,7 +3938,7 @@ void setup() {
         "BlinkLed",     // Name of the task (for debugging)
         1024,           // Stack size (bytes)                              // printf needs atleast 1kb
         NULL,           // Parameter to pass
-        1,              // Task priority
+        1,              // Task priority - low
         NULL            // Task handle
     );
 
@@ -3787,9 +3946,9 @@ void setup() {
     xTaskCreate(
         Timer100ms,     // Function that should be called
         "Timer100ms",   // Name of the task (for debugging)
-        3072,           // Stack size (bytes)                              
+        4608,           // Stack size (bytes)
         NULL,           // Parameter to pass
-        1,              // Task priority
+        3,              // Task priority - medium
         NULL            // Task handle
     );
 
@@ -3799,36 +3958,37 @@ void setup() {
         "Timer1S",      // Name of the task (for debugging)
         4096,           // Stack size (bytes)                              
         NULL,           // Parameter to pass
-        1,              // Task priority
+        3,              // Task priority - medium
         NULL            // Task handle
     );
 
     // Setup WiFi, webserver and firmware OTA
     // Please be aware that after doing a OTA update, its possible that the active partition is set to OTA1.
     // Uploading a new firmware through USB will however update OTA0, and you will not notice any changes...
+    WiFiSetup();
 
-    // Create Task that setups the network, and the webserver 
-    xTaskCreate(
-        SetupNetworkTask,     // Function that should be called
-        "SetupNetworkTask",   // Name of the task (for debugging)
-        10000,                // Stack size (bytes)                              // printf needs atleast 1kb
-        NULL,                 // Parameter to pass
-        1,                    // Task priority
-        NULL                  // Task handleCTReceive
-    );
-    
     // Set eModbus LogLevel to 1, to suppress possible E5 errors
     MBUlogLvl = LOG_LEVEL_CRITICAL;
     ConfigureModbusMode(255);
   
     BacklightTimer = BACKLIGHT;
     GLCD_init();
+
+    CP_ON;           // CP signal ACTIVE
           
 }
 
 void loop() {
 
     delay(1000);
+    // retrieve time from NTP server
+    LocalTimeSet = getLocalTime(&timeinfo, 1000U);
+
+#ifndef DEBUG_DISABLED
+    // Remote debug over WiFi
+    Debug.handle();
+#endif
+
 
     // TODO move this to a once a minute loop?
     if (DelayedStartTime.epoch2 && LocalTimeSet) {

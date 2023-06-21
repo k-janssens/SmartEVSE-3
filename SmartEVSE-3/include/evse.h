@@ -75,7 +75,7 @@ extern RemoteDebug Debug;
 #endif
 
 
-#define PHASE_DETECTION_TIME 11
+#define PHASE_DETECTION_TIME 22                                                 // especially Tesla seems to need up to 20 seconds to have all its phases activated
 
 // Pin definitions left side ESP32
 #define PIN_TEMP 36
@@ -192,6 +192,9 @@ extern RemoteDebug Debug;
 #define STATE_ACTSTART 8                                                        // I Activation mode in progress
 #define STATE_B1 9                                                              // J Vehicle connected / no PWM signal
 #define STATE_C1 10                                                             // K Vehicle charging / no PWM signal (temp state when stopping charge from EVSE)
+#define STATE_MODEM_REQUEST 11                                                          // L Vehicle connected / requesting ISO15118 communication, 0% duty
+#define STATE_MODEM_WAIT 12                                                          // M Vehicle connected / requesting ISO15118 communication, 5% duty
+#define STATE_MODEM_DONE 13                                                // Modem communication succesful, SoCs extracted. Here, re-plug vehicle
 
 #define NOSTATE 255
 
@@ -218,6 +221,9 @@ extern RemoteDebug Debug;
 #define WAITING_LED_BRIGHTNESS 255
 #define LCD_BRIGHTNESS 255
 
+
+#define CP_ON digitalWrite(PIN_CPOFF, LOW);
+#define CP_OFF digitalWrite(PIN_CPOFF, HIGH);
 
 #define CONTACTOR1_ON digitalWrite(PIN_SSR, HIGH);
 #define CONTACTOR1_OFF digitalWrite(PIN_SSR, LOW);
@@ -529,5 +535,6 @@ uint8_t setItemValue(uint8_t nav, uint16_t val);
 uint16_t getItemValue(uint8_t nav);
 void ConfigureModbusMode(uint8_t newmode);
 
+void handleWIFImode(void);
 
 #endif

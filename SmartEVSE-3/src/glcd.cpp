@@ -435,9 +435,9 @@ void GLCD(void) {
                 } else GLCD_write_buf_str(0,0, "Not connected to WiFi", GLCD_ALIGN_LEFT);
 
             // When Wifi Setup is selected, show password and SSID of the Access Point
-            } else if (WIFImode == 2 && SubMenu) {
-                if (LCDTimer <= 10 && WiFi.getMode() != WIFI_AP_STA) {           // Do not show if AP_STA mode is started 
-                    sprintf(Str, "Start portal in %u sec", 10-LCDTimer);
+            } else if (WIFImode == 2) {
+                if (SubMenu && WiFi.getMode() != WIFI_AP_STA) {           // Do not show if AP_STA mode is started 
+                    sprintf(Str, "Up button starts portal");
                     GLCD_write_buf_str(0,0, Str, GLCD_ALIGN_LEFT);                                        
                 } else {
                     // Show Access Point name
@@ -523,6 +523,12 @@ void GLCD(void) {
         if (ErrorFlags & LESS_6A) {
             GLCD_print_buf2(2, (const char *) "WAITING");
             GLCD_print_buf2(4, (const char *) "FOR POWER");
+        } else if (State == STATE_MODEM_REQUEST || State == STATE_MODEM_WAIT || State == STATE_MODEM_DONE) {                                          // Modem states
+
+            BacklightTimer = BACKLIGHT;
+
+            GLCD_print_buf2(2, (const char *) "MODEM");
+            GLCD_print_buf2(4, (const char *) "COMMUNICATION");
         } else if (State == STATE_C) {                                          // STATE C
             
             BacklightTimer = BACKLIGHT;
@@ -688,6 +694,8 @@ void GLCD(void) {
             if (!LCDToggle) {
                 GLCD_print_buf2(5, (const char *) "WAITING");
             } else GLCD_print_buf2(5, (const char *) "FOR SOLAR");
+        } else if (State == STATE_MODEM_REQUEST || State == STATE_MODEM_WAIT || State == STATE_MODEM_DONE) {                                          // Modem states
+            GLCD_print_buf2(5, (const char *) "MODEM");
         } else if (State != STATE_C) {
                 switch (Switching_To_Single_Phase) {
                     case FALSE:
@@ -967,7 +975,6 @@ uint8_t getMenuItems (void) {
 
 
 
-
 /**
  * Called when one of the SmartEVSE buttons is pressed
  * 
@@ -1035,6 +1042,13 @@ void GLCDMenu(uint8_t Buttons) {
                         } while (!getItemValue(MENU_MAINSMETER) && value != MODE_NORMAL);
                         setItemValue(LCDNav, value);
                         break;
+                    case MENU_WIFI:
+                        value = getItemValue(LCDNav);
+                        value = MenuNavInt(Buttons, value, MenuStr[LCDNav].Min, MenuStr[LCDNav].Max);
+                        setItemValue(LCDNav, value);
+                        if (value !=2 )
+                            handleWIFImode();                                   //postpone handling WIFImode == 2 to moving to upper line
+                        break;
                     default:
                         value = getItemValue(LCDNav);
                         value = MenuNavInt(Buttons, value, MenuStr[LCDNav].Min, MenuStr[LCDNav].Max);
@@ -1064,6 +1078,9 @@ void GLCDMenu(uint8_t Buttons) {
                 ICal = ((unsigned long)CT1 * 10 + 5) * ICAL / Iuncal;           // Calculate new Calibration value
                 Irms[0] = CT1;                                                  // Set the Irms value, so the LCD update is instant
             }
+            uint8_t WIFImode = getItemValue(MENU_WIFI);
+            if (LCDNav == MENU_WIFI && WIFImode == 2)
+                handleWIFImode();
         } else {                                                                // We are currently not in Submenu.
             SubMenu = 1;                                                        // Enter Submenu now
             if (LCDNav == MENU_CAL) {                                           // CT1 calibration start
