@@ -69,9 +69,8 @@
             $('#modem_computed_soc').html(computed_soc >= 0 ? computed_soc + " &#37;" : "N/A");
 
             $('#mode').text(data.mode);
-            
             $('#dutycycle').text((data.evse.pwm*100/1024).toFixed(0) + " %");
-            
+
             if(data.evse.loadbl > 1) {
               $('[id=loadbl]').show();
               $('[id=loadbl_text]').show();
@@ -83,11 +82,11 @@
               //$('[id=form_mode] :input').prop('disabled',true);
               $('[id=mode_2]').hide();
               $('[id=mode_3]').hide();
-              //$('[id=mode_override_current]').prop('disabled',true); 
+              //$('[id=mode_override_current]').prop('disabled',true);
               $('[id=form_pwm] :input').prop('disabled',true);
             } else if (data.evse.loadbl == 1) {
               $('[id=loadbl]').show();
-              $('[id=loadbl_text]').show(); 
+              $('[id=loadbl_text]').show();
               $('[id=loadbl_node]').text("Master");
               //$('[id=loadbl_text_slave]').hide();
               //$('[id=loadbl_text_master]').show();
@@ -96,7 +95,7 @@
               //$('[id=form_mode] :input').prop('disabled',false);
               $('[id=mode_2]').show();
               $('[id=mode_3]').show();
-              //$('[id=mode_override_current]').prop('disabled',false); 
+              //$('[id=mode_override_current]').prop('disabled',false);
               $('[id=form_pwm] :input').prop('disabled',false);
             } else {
               $('[id=loadbl]').hide();
@@ -108,10 +107,10 @@
               //$('[id=form_mode] :input').prop('disabled',false);
               $('[id=mode_2]').show();
               $('[id=mode_3]').show();
-              //$('[id=mode_override_current]').prop('disabled',false); 
+              //$('[id=mode_override_current]').prop('disabled',false);
               $('[id=form_pwm] :input').prop('disabled',false);
             }
-            
+
             $('#car_connected').text(data.car_connected ? "Yes" : "No");
             $('#state').text(data.evse.state);
             $('#temp').text(data.evse.temp + " °C / " + data.evse.temp_max + " °C");
@@ -297,7 +296,7 @@
                                             <div class="col">
                                               <div class="h5 mb-0 mr-3 text-gray-800" id="loadbl_node"></div>
                                             </div>
-                                        </div>                                        
+                                        </div>
                                         <div class="row no-gutters align-items-center with_modem">
                                             <div class="col-auto h5 mb-0 mr-3 font-weight-bold text-gray-800" style="width: 120px;">
                                                 Duty cycle:
@@ -809,15 +808,15 @@
                                       <div class="col h5 mb-0 mr-3 font-weight-bold text-gray-800">
                                           <span id="loadbl_text_slave">Slave node - control is disabled, perform changes on Master node.</span>
                                           <span id="loadbl_text_master">Master node - control changes are propagated to Slave node(s).</span>
-                                      </div>                                      
-                                    </div>                                      
+                                      </div>
+                                    </div>
 -->                                    
                                     <div class="row no-gutters align-items-center">
                                       <div class="col-auto h5 mb-0 mr-3 font-weight-bold text-gray-800" style="width: 120px;">
                                           Mode:
                                         </div>
                                         <div class="col">
-                                          <form class="form-inline" id="form_mode"> 
+                                          <form class="form-inline" id="form_mode">
                                             <button id="mode_0" onclick="activate('0')" style="width: 100px; display:inline-block;">OFF</button>
                                             <button id="mode_1" onclick="activate('1')" style="width: 120px; display:inline-block;">NORMAL</button>
                                             <div id="with_mainsmeter" style="display: inline">
@@ -825,7 +824,7 @@
                                               <button id="mode_3" onclick="activate('3')" style="width: 100px; display:inline-block;">SMART</button>
                                             </div>
                                             <div class="form-group">
-                                              <label for="starttime"> ...STARTING: </label>
+                                              <label for="starttime">...STARTING: </label>
                                               <div class="input-group">
                                                 <input type="datetime-local" id="starttime" name="starttime" class="form-control" style="max-width: 220px;">
                                               </div>
@@ -875,7 +874,7 @@
                                             <button onclick="postPWM(50)" style="width: 120px; display:inline-block;">5&#37;</button>
                                             <button onclick="postPWM(1024)" style="width: 120px; display:inline-block;">100&#37;</button>
                                             <button onclick="postPWM(-1)" style="width: 120px; display:inline-block;">reset</button>
-                                          </form>  
+                                          </form>
                                         </div>
                                     </div>
                                   </div>
