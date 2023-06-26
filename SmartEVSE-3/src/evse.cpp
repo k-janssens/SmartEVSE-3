@@ -2190,7 +2190,6 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
                         ToModemWaitStateTimer = 0;
                         ToModemDoneStateTimer = 0;
                         LeaveModemDoneStateTimer = 0;
-                        LeaveModemDeniedStateTimer = 0;
                         setAccess(0);
                         break;
                     case 1:
