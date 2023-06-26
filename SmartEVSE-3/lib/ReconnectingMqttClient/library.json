@@ -1,0 +1,38 @@
+{
+  "name": "ReconnectingMqttClient",
+  "description": "ReconnectingMqttClient is an open-source simple and portable C++ MQTT client library",
+  "keywords": "communication,protocol,mqtt,client,network,c++,arduino,posix,windows,linux,esp8266,esp32,raspberry",
+  "license": "Apache-2.0",
+  "authors":
+  {
+    "name": "Fred Larsen",
+    "email": "fredilarsen+github@hotmail.com",
+    "maintainer": true
+  },
+  "repository":
+  {
+    "type": "git",
+    "url": "https://github.com/fredilarsen/ReconnectingMqttClient.git"
+  },
+  "version": "1.2.0",
+  "examples": [
+    "examples/*/*/*.ino"
+    ],
+  "frameworks": "arduino",
+  "dependencies": {
+      "PJON" : ">=13.0"
+  },
+  "platforms":
+  [
+    "atmelavr",
+    "atmelsam",
+    "espressif8266",
+    "esp32",
+    "teensy",
+    "linux_x86_64",
+    "windows_x86"
+  ],
+  "build" : {
+    "flags": "-std=c++11"
+  }
+}
