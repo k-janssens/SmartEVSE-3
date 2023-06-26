@@ -2395,6 +2395,7 @@ void mqttPublishData()
         MQTTclient.publish(String(MQTTprefix + "/HomeBatteryCurrent").c_str(), String(homeBatteryCurrent).c_str(), false, 0);
         MQTTclient.publish(String(MQTTprefix + "/EVConnected").c_str(), (pilot != PILOT_12V) ? "1" : "0", true, 0);
         MQTTclient.publish(String(MQTTprefix + "/EVEnergyCharged").c_str(), String(EnergyCharged).c_str(), true, 0);
+        MQTTclient.publish(String(MQTTprefix + "/EVComputedSoC").c_str(), String(ComputedSoC).c_str(), true, 0);
     }
 }
 #endif
