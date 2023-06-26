@@ -1,0 +1,29 @@
+#######################################
+# Syntax Coloring Map For ReconnectingMqttClient
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+PJON	KEYWORD1
+TCPHelperClient KEYWORD1
+ReconnectingMqttClient  KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+RMCReceiveCallback	KEYWORD1
+
+
+#######################################
+# Instances (KEYWORD2)
+#######################################
+
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+
