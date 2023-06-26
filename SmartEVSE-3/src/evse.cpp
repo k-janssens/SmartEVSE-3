@@ -1548,20 +1548,26 @@ void printStatus(void)
 // This function is called by kWh logic and after an EV state update through API, Serial or MQTT
 void RecomputeSoC(void) {
     if (FullSoC > 0 && EnergyCapacity > 0) {
-        if (EnergyRequest > 0) {
+        if (InitialSoC == FullSoC) {
+            // We're already at full SoC
+            ComputedSoC = FullSoC;
+            RemainingSoC = 0;
+        } else if (EnergyRequest > 0) {
             // Attempt to use EnergyRequest to determine SoC with greater accuracy
-            uint32_t RemainingEnergyWh = (EnergyCharged > 0 ? EnergyRequest - EnergyCharged : EnergyRequest);
+            // We're adding 50 Wh to EnergyCharged here to be sure we reach 100% ComputedSoC and compensate for losses
+            uint32_t RemainingEnergyWh = (EnergyCharged > 0 ? EnergyRequest - (EnergyCharged + 50) : EnergyRequest);
             if (RemainingEnergyWh > 0) {
                 ComputedSoC = FullSoC - (((double) RemainingEnergyWh / EnergyCapacity) * 100);
                 RemainingSoC = FullSoC - ComputedSoC;
-                _LOG_I("FullSoc: %i, EnergyRequest: %i, EnergyCharged: %i, EnergyCapacity: %i, ComputedSoC: %i, RemainingSoC: %i, RemainingEnergyWh: %i", FullSoC, EnergyRequest, EnergyCharged, EnergyCapacity, ComputedSoC, RemainingSoC, RemainingEnergyWh);
                 return;
+            } else {
+                ComputedSoC = FullSoC;
+                RemainingSoC = 0;
             }
         } else if (InitialSoC > 0) {
             // Fall back to rough estimate based on InitialSoC if we do not know the requested energy
             ComputedSoC = InitialSoC + (((double) EnergyCharged / EnergyCapacity) * 100);
             RemainingSoC = FullSoC - ComputedSoC;
-            _LOG_I("FullSoc: %i, InitialSoC: %i, EnergyCharged: %i, EnergyCapacity: %i, ComputedSoC: %i", FullSoC, InitialSoC, EnergyCharged, EnergyCapacity, ComputedSoC);
         }
     }
     // There's also the possibility an external API/app is used for SoC info. In such case, we allow setting ComputedSoC directly.
