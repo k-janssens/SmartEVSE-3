@@ -410,6 +410,7 @@ extern uint8_t CalActive;                                                       
 extern uint16_t Iuncal;
 extern uint16_t SolarStopTimer;
 extern int32_t EnergyCharged;
+extern int32_t EnergyCapacity;
 extern int32_t PowerMeasured;
 extern uint8_t RFIDstatus;
 extern bool LocalTimeSet;
