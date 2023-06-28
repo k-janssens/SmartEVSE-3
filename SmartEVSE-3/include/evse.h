@@ -74,7 +74,6 @@
 extern RemoteDebug Debug;
 #endif
 
-// #define MQTT_DISABLED 1                                                      // Uncomment to disable MQTT support in code
 
 #define PHASE_DETECTION_TIME 22                                                 // especially Tesla seems to need up to 20 seconds to have all its phases activated
 
