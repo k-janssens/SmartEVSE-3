@@ -69,7 +69,7 @@ String APhostname = "SmartEVSE-" + String( MacId() & 0xffff, 10);           // S
 String MQTTuser;
 String MQTTpassword;
 String MQTTprefix = APhostname;
-IPAddress MQTTbrokerIp({0, 0, 0, 0});
+String MQTTbrokerHost = "";
 uint16_t MQTTbrokerPort;
 WiFiClient client;
 MQTTClient MQTTclient;
@@ -2301,13 +2301,13 @@ void SetupMQTTClient()
     }
 
     // No need to attempt connections if we aren't configured
-    if (strcmp(MQTTbrokerIp.toString().c_str(), "0.0.0.0") == 0)
+    if (MQTTbrokerHost == "")
     {
         return;
     }
 
     // Setup and connect MQTT client instance
-    MQTTclient.setHost(MQTTbrokerIp.toString().c_str(), MQTTbrokerPort);
+    MQTTclient.setHost(MQTTbrokerHost.c_str(), MQTTbrokerPort);
 
     if (MQTTuser != "" && MQTTpassword != "")
     {
@@ -3211,7 +3211,7 @@ void read_settings(bool write) {
         MQTTpassword = preferences.getString("MQTTpassword");
         MQTTuser = preferences.getString("MQTTuser");
         MQTTprefix = preferences.getString("MQTTprefix", APhostname);
-        MQTTbrokerIp.fromString(preferences.getString("MQTTbrokerIp", "0.0.0.0"));
+        MQTTbrokerHost = preferences.getString("MQTTbrokerHost", "");
         MQTTbrokerPort = preferences.getUShort("MQTTbrokerPort", 1883);
 #endif
 
@@ -3276,7 +3276,7 @@ void write_settings(void) {
     preferences.putString("MQTTpassword", MQTTpassword);
     preferences.putString("MQTTuser", MQTTuser);
     preferences.putString("MQTTprefix", MQTTprefix);
-    preferences.putString("MQTTbrokerIp", MQTTbrokerIp.toString());
+    preferences.putString("MQTTbrokerHost", MQTTbrokerHost);
     preferences.putUShort("MQTTbrokerPort", MQTTbrokerPort);
 #endif
 
@@ -3519,7 +3519,7 @@ void StartwebServer(void) {
         doc["car_modem"]["computed_soc"] = ComputedSoC; 
 
 #ifndef MQTT_DISABLED
-        doc["mqtt"]["broker_ip"] = MQTTbrokerIp.toString();
+        doc["mqtt"]["broker_host"] = MQTTbrokerHost;
         doc["mqtt"]["broker_port"] = MQTTbrokerPort;
         doc["mqtt"]["topic_prefix"] = MQTTprefix;
         doc["mqtt"]["username"] = MQTTuser;
@@ -3742,14 +3742,9 @@ void StartwebServer(void) {
         if(request->hasParam("mqtt_update")) {
             if (request->getParam("mqtt_update")->value().toInt() == 1) {
 
-                if(request->hasParam("mqtt_broker_ip")) {
-                    String inputMqttBrokerIp = request->getParam("mqtt_broker_ip")->value();
-                    if (!inputMqttBrokerIp || inputMqttBrokerIp == "") {
-                        MQTTbrokerIp.fromString("0.0.0.0");
-                    } else {
-                        MQTTbrokerIp.fromString(inputMqttBrokerIp);
-                    }
-                    doc["mqtt_broker_ip"] = MQTTbrokerIp;
+                if(request->hasParam("mqtt_broker_host")) {
+                    MQTTbrokerHost = request->getParam("mqtt_broker_host")->value();
+                    doc["mqtt_broker_host"] = MQTTbrokerHost;
                 }
 
                 if(request->hasParam("mqtt_broker_port")) {
