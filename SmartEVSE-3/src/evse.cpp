@@ -1557,7 +1557,7 @@ void RecomputeSoC(void) {
             // We're adding 50 Wh to EnergyCharged here to be sure we reach 100% ComputedSoC and compensate for losses
             uint32_t RemainingEnergyWh = (EnergyCharged > 0 ? EnergyRequest - (EnergyCharged) : EnergyRequest);
             if (RemainingEnergyWh > 0) {
-                ComputedSoC = FullSoC - round(((double) RemainingEnergyWh / EnergyCapacity) * 100);
+                ComputedSoC = FullSoC - (((double) RemainingEnergyWh / EnergyCapacity) * FullSoC);
                 RemainingSoC = FullSoC - ComputedSoC;
                 return;
             } else {
@@ -1566,7 +1566,7 @@ void RecomputeSoC(void) {
             }
         } else if (InitialSoC > 0) {
             // Fall back to rough estimate based on InitialSoC if we do not know the requested energy
-            ComputedSoC = InitialSoC + (((double) EnergyCharged / EnergyCapacity) * 100);
+            ComputedSoC = InitialSoC + (((double) EnergyCharged / EnergyCapacity) * FullSoC);
             RemainingSoC = FullSoC - ComputedSoC;
         }
     }
