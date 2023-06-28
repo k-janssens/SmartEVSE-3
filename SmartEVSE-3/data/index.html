@@ -69,6 +69,7 @@
 
             if (data.ev_state) {
               let full_soc = data.ev_state.full_soc;
+              let initial_soc = data.ev_state.initial_soc;
               let computed_soc = data.ev_state.computed_soc;
               let energy_capacity = data.ev_state.energy_capacity;
               let energy_request = data.ev_state.energy_request;
@@ -76,6 +77,7 @@
 
               $('#computed_soc').html(computed_soc >= 0 ? computed_soc + " &#37;" : "N/A");
               $('#full_soc').html(full_soc >= 0 ? full_soc + " &#37;" : "N/A");
+              $('#initial_soc').html(initial_soc >= 0 ? initial_soc + " &#37;" : "N/A");
               $('#energy_capacity').html(energy_capacity >= 0 ? energy_capacity.toFixed(1) + " kWh" : "N/A");
               $('#evccid').html(evccid || "N/A");
             }
@@ -431,6 +433,14 @@
                                           </div>
                                           <div class="col">
                                               <div class="h5 mb-0 mr-3 text-gray-800" id="computed_soc" style="text-align: right;"></div>
+                                          </div>
+                                        </div>
+                                        <div class="row no-gutters align-items-center">
+                                          <div class="col-auto h5 mb-0 mr-3 font-weight-bold text-gray-800" style="width: 150px;">
+                                              Initial SoC
+                                          </div>
+                                          <div class="col">
+                                              <div class="h5 mb-0 mr-3 text-gray-800" id="initial_soc" style="text-align: right;"></div>
                                           </div>
                                         </div>
                                         <div class="row no-gutters align-items-center">

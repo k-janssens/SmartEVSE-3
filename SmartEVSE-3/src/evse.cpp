@@ -1504,9 +1504,9 @@ void RecomputeSoC(void) {
         } else if (EnergyRequest > 0) {
             // Attempt to use EnergyRequest to determine SoC with greater accuracy
             // We're adding 50 Wh to EnergyCharged here to be sure we reach 100% ComputedSoC and compensate for losses
-            uint32_t RemainingEnergyWh = (EnergyCharged > 0 ? EnergyRequest - (EnergyCharged + 50) : EnergyRequest);
+            uint32_t RemainingEnergyWh = (EnergyCharged > 0 ? EnergyRequest - (EnergyCharged) : EnergyRequest);
             if (RemainingEnergyWh > 0) {
-                ComputedSoC = FullSoC - (((double) RemainingEnergyWh / EnergyCapacity) * 100);
+                ComputedSoC = FullSoC - round(((double) RemainingEnergyWh / EnergyCapacity) * 100);
                 RemainingSoC = FullSoC - ComputedSoC;
                 return;
             } else {
@@ -1527,13 +1527,12 @@ void RecomputeSoC(void) {
 void DisconnectEvent(void){
     _LOG_A("EV disconnected for a while. Resetting SoC states");
     ModemStage = 0; // Enable Modem states again
-    LeaveModemDeniedStateTimer = 0; // Reset ModemDeniedStateTimer
     InitialSoC = -1;
     FullSoC = -1;
     RemainingSoC = -1;
     ComputedSoC = -1;
     EnergyCapacity = -1;
-    strcpy(EVCCID, "");
+    strncpy(EVCCID, "", sizeof(EVCCID));
 }
 
 /**
@@ -2193,7 +2192,7 @@ void Timer1S(void * parameter) {
                 // This stage we are now in is just before we enable CP_PIN and resume via STATE_B   
 
                 // Check whether the EVCCID matches the one required
-                if (strcmp(RequiredEVCCID, EVCCID) == 0) {
+                if (strcmp(RequiredEVCCID, "") == 0 || strcmp(RequiredEVCCID, EVCCID) == 0) {
                     // We satisfied the EVCCID requirements, skip modem stages next time
                     ModemStage = 1;
 
@@ -2999,7 +2998,7 @@ void read_settings(bool write) {
 
         EnableC2 = (EnableC2_t) preferences.getUShort("EnableC2", ENABLE_C2);
         Modem = (Modem_t) preferences.getUShort("Modem", MODEM);
-        strcpy(RequiredEVCCID, preferences.getString("RequiredEVCCID", "").c_str());
+        strncpy(RequiredEVCCID, preferences.getString("RequiredEVCCID", "").c_str(), sizeof(RequiredEVCCID));
         maxTemp = preferences.getUShort("maxTemp", MAX_TEMPERATURE);
 
         preferences.end();                                  
@@ -3554,7 +3553,7 @@ void StartwebServer(void) {
         //if required_evccid is set to a value, SmartEVSE will only allow charging requests from said EVCCID
         if(request->hasParam("required_evccid")) {
             if (request->getParam("required_evccid")->value().length() <= 32) {
-                strcpy(RequiredEVCCID, request->getParam("required_evccid")->value().c_str());
+                strncpy(RequiredEVCCID, request->getParam("required_evccid")->value().c_str(), sizeof(RequiredEVCCID));
                 doc["required_evccid"] = RequiredEVCCID;
                 write_settings();
             } else {
@@ -3674,7 +3673,7 @@ void StartwebServer(void) {
         // Update EVCCID of car
         if (request->hasParam("evccid")) {
             if (request->getParam("evccid")->value().length() <= 32) {
-                strcpy(EVCCID, request->getParam("evccid")->value().c_str());
+                strncpy(EVCCID, request->getParam("evccid")->value().c_str(), sizeof(EVCCID));
                 doc["evccid"] = EVCCID;
             }
         }
