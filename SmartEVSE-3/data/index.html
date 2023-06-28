@@ -829,6 +829,8 @@
                         } else {
                             alert('Missing broker IP or port');
                         }
+
+                        event.preventDefault();
                     }
                     function reboot() {
                         $.post( "/reboot");

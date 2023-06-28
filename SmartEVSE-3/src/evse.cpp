@@ -30,7 +30,7 @@
 #include <soc/rtc_io_struct.h>
 
 #ifndef MQTT_DISABLED
-#include <ReconnectingMqttClient.h>
+#include <MQTT.h>
 #endif
 
 #include "evse.h"
@@ -71,7 +71,8 @@ String MQTTpassword;
 String MQTTprefix = APhostname;
 IPAddress MQTTbrokerIp({0, 0, 0, 0});
 uint16_t MQTTbrokerPort;
-ReconnectingMqttClient MQTTclient;
+WiFiClient client;
+MQTTClient MQTTclient;
 bool MQTTconfigured = false;
 TaskHandle_t MqttTaskHandle = NULL;
 uint8_t lastMqttUpdate = 0;
@@ -100,8 +101,8 @@ struct ModBus MB;          // Used by SmartEVSE fuctions
 const char StrStateName[14][10] = {"A", "B", "C", "D", "COMM_B", "COMM_B_OK", "COMM_C", "COMM_C_OK", "Activate", "B1", "C1", "MODEM1", "MODEM2", "MODEM_OK"};
 const char StrStateNameWeb[14][17] = {"Ready to Charge", "Connected to EV", "Charging", "D", "Request State B", "State B OK", "Request State C", "State C OK", "Activate", "Charging Stopped", "Stop Charging", "Modem Setup", "Modem Request","Modem Done",};
 const char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
-const char StrMode[4][10] = {"Off", "Normal", "Smart", "Solar"};
-const char StrAccessBit[2][6] = {"Deny", "Allow"};
+const char StrMode[3][8] = {"NORMAL", "SMART", "SOLAR"};
+const char StrAccessBit[2][6] = {"DENY", "ALLOW"};
 const char StrRFIDStatusWeb[8][20] = {"Ready to read card","Present", "Card Stored", "Card Deleted", "Card already stored", "Card not in storage", "Card Storage full", "Invalid" };
 
 // Global data
@@ -564,8 +565,11 @@ const char * getStateNameWeb(uint8_t StateCode) {
     else return "NOSTATE";    
 }
 
-const char * getModeName(uint8_t modeId) {
-    if(modeId < 4) return StrMode[modeId];
+const char * getModeName(uint8_t mode) {
+    if (Access_bit == 0) {
+        return "OFF";
+    }
+    if(mode < 3) return StrMode[mode];
     else return "N/A";
 }
 
@@ -2162,57 +2166,39 @@ uint8_t PollEVNode = NR_EVSES;
 }
 
 #ifndef MQTT_DISABLED
-void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t len, void *)
+void mqtt_receive_callback(const String &topic, const String &payload)
 {
-    String stopic = String(topic);
-
-    if (stopic == MQTTprefix + "/Set/Mode")
+    if (topic == MQTTprefix + "/Set/Mode")
     {
-        if (memcmp(payload, "Normal", 6) == 0) {
+        if (payload == "NORMAL") {
             setMode(MODE_NORMAL);
-        } else if (memcmp(payload, "Solar", 5) == 0) {
+        } else if (payload == "SOLAR") {
             OverrideCurrent = 0;
             setMode(MODE_SOLAR);
-        } else if (memcmp(payload, "Smart", 5) == 0) {
+        } else if (payload == "SMART") {
             OverrideCurrent = 0;
             setMode(MODE_SMART);
-        } else {
-            int RequestedModeId = atoi((char *)payload);
-            if (RequestedModeId > -1 && RequestedModeId < 4)
-            {
-                // MQTT mode change does not support delayed charging as of now, so reset to defaults
-                DelayedStartTime.epoch2 = DELAYEDSTARTTIME;
-                DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
-                DelayedRepeat = 0;
-
-                switch (RequestedModeId) {
-                    case 0: // OFF
-                        ToModemWaitStateTimer = 0;
-                        ToModemDoneStateTimer = 0;
-                        LeaveModemDoneStateTimer = 0;
-                        setAccess(0);
-                        break;
-                    case 1:
-                        setMode(MODE_NORMAL);
-                        break;
-                    case 2:
-                        setMode(MODE_SOLAR);
-                        break;
-                    case 3:
-                        setMode(MODE_SMART);
-                        break;
-                }
-            }
+        } else if (payload == "OFF") {
+            ToModemWaitStateTimer = 0;
+            ToModemDoneStateTimer = 0;
+            LeaveModemDoneStateTimer = 0;
+            setAccess(0);
         }
+
         write_settings();
     }
-    else if (stopic == MQTTprefix + "/Set/Access")
+    else if (topic == MQTTprefix + "/Set/Access")
     {
-        setAccess(atoi((char *)payload));
+        // Only accept explicit values
+        if (payload == "1" || payload == "YES" || payload == "ON") {
+            setAccess(1);
+        } else if (payload == "0" || payload == "NO" || payload == "OFF") {
+            setAccess(0);
+        }
     }
-    else if (stopic == MQTTprefix + "/Set/OverrideCurrent")
+    else if (topic == MQTTprefix + "/Set/OverrideCurrent")
     {
-        int RequestedCurrent = atoi((char *)payload);
+        uint16_t RequestedCurrent = payload.toInt();
         if (RequestedCurrent == 0)
         {
             OverrideCurrent = 0;
@@ -2225,45 +2211,13 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
             }
         }
     }
-    else if (stopic == MQTTprefix + "/Set/SolarStartCurrent")
-    {
-        int RequestedCurrent = atoi((char *)payload);
-        if (RequestedCurrent >= 0 && RequestedCurrent <= 48)
-        {
-            StartCurrent = RequestedCurrent;
-            write_settings();
-        }
-    }
-    else if (stopic == MQTTprefix + "/Set/SolarMaxImportCurrent")
-    {
-        int RequestedCurrent = atoi((char *)payload);
-        if (RequestedCurrent >= 0 && RequestedCurrent <= 48)
-        {
-            ImportCurrent = RequestedCurrent;
-            write_settings();
-        }
-    }
-    else if (stopic == MQTTprefix + "/Set/EnableC2")
-    {
-        EnableC2 = (EnableC2_t)atoi((char *)payload);
-        write_settings();
-    }
-    else if (stopic == MQTTprefix + "/Set/StopTimer")
-    {
-        int RequestedStopTimer = atoi((char *)payload);
-        if (RequestedStopTimer >= 0 && RequestedStopTimer <= 60)
-        {
-            StopTime = RequestedStopTimer;
-            write_settings();
-        }
-    }
-    else if (stopic == MQTTprefix + "/Set/MainsMeter")
+    else if (topic == MQTTprefix + "/Set/MainsMeter")
     {
         if (MainsMeter != EM_API)
             return;
 
         int32_t L1, L2, L3;
-        int n = sscanf((char *)payload, "%d:%d:%d", &L1, &L2, &L3);
+        int n = sscanf(payload.c_str(), "%d:%d:%d", &L1, &L2, &L3);
 
         if (n == 3 && L1 < 1000 && L2 < 1000 && L3 < 1000)
         {
@@ -2290,13 +2244,13 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
             UpdateCurrentData();
         }
     }
-    else if (stopic == MQTTprefix + "/Set/EVMeter")
+    else if (topic == MQTTprefix + "/Set/EVMeter")
     {
         if (EVMeter != EM_API)
             return;
 
         int32_t L1, L2, L3, W, WH;
-        int n = sscanf((char *)payload, "%d:%d:%d:%d:%d", &L1, &L2, &L3, &W, &WH);
+        int n = sscanf(payload.c_str(), "%d:%d:%d:%d:%d", &L1, &L2, &L3, &W, &WH);
 
         // We expect 5 values (and accept -1 for unknown values)
         if (n == 5)
@@ -2328,9 +2282,9 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
             }
         }
     }
-    else if (stopic == MQTTprefix + "/Set/HomeBatteryCurrent")
+    else if (topic == MQTTprefix + "/Set/HomeBatteryCurrent")
     {
-        homeBatteryCurrent = atoi((char *)payload);
+        homeBatteryCurrent = payload.toInt();
         homeBatteryLastUpdate = time(NULL);
     }
 
@@ -2341,9 +2295,9 @@ void mqtt_receive_callback(const char *topic, const uint8_t *payload, uint16_t l
 void SetupMQTTClient()
 {
     // Disconnect existing connection if connected
-    if (MQTTclient.is_connected())
+    if (MQTTclient.connected())
     {
-        MQTTclient.stop();
+        MQTTclient.disconnect();
     }
 
     // No need to attempt connections if we aren't configured
@@ -2352,17 +2306,24 @@ void SetupMQTTClient()
         return;
     }
 
-    // Setup MQTT client instance
-    if (MQTTuser && MQTTpassword)
+    // Setup and connect MQTT client instance
+    MQTTclient.setHost(MQTTbrokerIp.toString().c_str(), MQTTbrokerPort);
+
+    if (MQTTuser != "" && MQTTpassword != "")
     {
-        MQTTclient.set_credentials(MQTTuser.c_str(), MQTTpassword.c_str());
+        MQTTclient.connect(APhostname.c_str(), MQTTuser.c_str(), MQTTpassword.c_str());
+    } else {
+        MQTTclient.connect(APhostname.c_str());
     }
 
-    uint8_t mqttBrokerIp4[4] = {MQTTbrokerIp[0], MQTTbrokerIp[1], MQTTbrokerIp[2], MQTTbrokerIp[3]};
-    MQTTclient.set_address(mqttBrokerIp4, MQTTbrokerPort, APhostname.c_str());
-    MQTTclient.set_receive_callback(mqtt_receive_callback, NULL);
+    if (MQTTclient.connected())
+    {
+        // Set up global subscribe callback
+        MQTTclient.onMessage(mqtt_receive_callback);
 
-    MQTTclient.subscribe(String(MQTTprefix + "/Set/+").c_str(), 1);
+        // Set up subscriptions
+        MQTTclient.subscribe(String(MQTTprefix + "/Set/#"));
+    }
 
     MQTTconfigured = true;
 }
@@ -2371,30 +2332,29 @@ void mqttPublishData()
 {
     lastMqttUpdate = 0;
 
-    if (MQTTclient.is_connected())
+    if (MQTTclient.connected())
     {
-        // TODO: lots of optimisation possible here!
-        MQTTclient.publish(String(MQTTprefix + "/EVSEUptime").c_str(), String((esp_timer_get_time() / 1000000)).c_str(), false, 0);
-        MQTTclient.publish(String(MQTTprefix + "/EVSETemp").c_str(), String(TempEVSE).c_str(), false, 0);
-        MQTTclient.publish(String(MQTTprefix + "/C2Enabled").c_str(), (EnableC2 ? "1" : "0"), true, 0);
-        MQTTclient.publish(String(MQTTprefix + "/Mode").c_str(), (Access_bit == 1 ? String((Mode + 1)).c_str() : "0"), true, 0);
-        MQTTclient.publish(String(MQTTprefix + "/ModeName").c_str(), getModeName(Mode), true, 0);
-        MQTTclient.publish(String(MQTTprefix + "/ChargeCurrent").c_str(), String(ChargeCurrent).c_str(), true, 0);
-        MQTTclient.publish(String(MQTTprefix + "/OverrideCurrent").c_str(), String(OverrideCurrent).c_str(), true, 0);
-        MQTTclient.publish(String(MQTTprefix + "/Access").c_str(), (Access_bit ? "1" : "0"), true, 0);
-        MQTTclient.publish(String(MQTTprefix + "/RFIDStatus").c_str(), getRFIDStatusWeb(RFIDstatus), true, 0);
-        MQTTclient.publish(String(MQTTprefix + "/State").c_str(), getStateNameWeb(State), true, 0);
-        MQTTclient.publish(String(MQTTprefix + "/Error").c_str(), getErrorNameWeb(ErrorFlags), true, 0);
-        MQTTclient.publish(String(MQTTprefix + "/IrmsL1").c_str(), String(Irms[0]).c_str(), false, 0);
-        MQTTclient.publish(String(MQTTprefix + "/IrmsL2").c_str(), String(Irms[1]).c_str(), false, 0);
-        MQTTclient.publish(String(MQTTprefix + "/IrmsL3").c_str(), String(Irms[2]).c_str(), false, 0);
-        MQTTclient.publish(String(MQTTprefix + "/IrmsEVL1").c_str(), String(Irms_EV[0]).c_str(), false, 0);
-        MQTTclient.publish(String(MQTTprefix + "/IrmsEVL2").c_str(), String(Irms_EV[1]).c_str(), false, 0);
-        MQTTclient.publish(String(MQTTprefix + "/IrmsEVL3").c_str(), String(Irms_EV[2]).c_str(), false, 0);
-        MQTTclient.publish(String(MQTTprefix + "/HomeBatteryCurrent").c_str(), String(homeBatteryCurrent).c_str(), false, 0);
-        MQTTclient.publish(String(MQTTprefix + "/EVConnected").c_str(), (pilot != PILOT_12V) ? "1" : "0", true, 0);
-        MQTTclient.publish(String(MQTTprefix + "/EVEnergyCharged").c_str(), String(EnergyCharged).c_str(), true, 0);
-        MQTTclient.publish(String(MQTTprefix + "/EVComputedSoC").c_str(), String(ComputedSoC).c_str(), true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVSEUptime", String((esp_timer_get_time() / 1000000)), false, 0);
+        MQTTclient.publish(MQTTprefix + "/EVSETemp", String(TempEVSE), false, 0);
+        MQTTclient.publish(MQTTprefix + "/C2Enabled", String(EnableC2), true, 0);
+        MQTTclient.publish(MQTTprefix + "/Mode", getModeName(Mode), true, 0);
+        MQTTclient.publish(MQTTprefix + "/ChargeCurrent", String(ChargeCurrent), true, 0);
+        MQTTclient.publish(MQTTprefix + "/OverrideCurrent", String(OverrideCurrent), true, 0);
+        MQTTclient.publish(MQTTprefix + "/Access", StrAccessBit[Access_bit], true, 0);
+        MQTTclient.publish(MQTTprefix + "/RFIDStatus", getRFIDStatusWeb(RFIDstatus), true, 0);
+        MQTTclient.publish(MQTTprefix + "/State", getStateNameWeb(State), true, 0);
+        MQTTclient.publish(MQTTprefix + "/Error", getErrorNameWeb(ErrorFlags), true, 0);
+        MQTTclient.publish(MQTTprefix + "/IrmsL1", String(Irms[0]), false, 0);
+        MQTTclient.publish(MQTTprefix + "/IrmsL2", String(Irms[1]), false, 0);
+        MQTTclient.publish(MQTTprefix + "/IrmsL3", String(Irms[2]), false, 0);
+        MQTTclient.publish(MQTTprefix + "/IrmsEVL1", String(Irms_EV[0]), false, 0);
+        MQTTclient.publish(MQTTprefix + "/IrmsEVL2", String(Irms_EV[1]), false, 0);
+        MQTTclient.publish(MQTTprefix + "/IrmsEVL3", String(Irms_EV[2]), false, 0);
+        MQTTclient.publish(MQTTprefix + "/HomeBatteryCurrent", String(homeBatteryCurrent).c_str(), false, 0);
+        MQTTclient.publish(MQTTprefix + "/EVConnected", (pilot != PILOT_12V) ? "1" : "0", true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVEnergyCharged", String(EnergyCharged).c_str(), true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVComputedSoC", String(ComputedSoC).c_str(), true, 0);
+        
     }
 }
 #endif
@@ -2677,7 +2637,7 @@ void Timer1S(void * parameter) {
 
 #ifndef MQTT_DISABLED
         // Process MQTT data
-        MQTTclient.update();
+        MQTTclient.loop();
 
         if (lastMqttUpdate++ >= 10) {
             // Publish latest data, every 10 seconds
@@ -3566,7 +3526,7 @@ void StartwebServer(void) {
         doc["mqtt"]["password_set"] = MQTTpassword != "";
 
         if (MQTTconfigured) {
-            if (MQTTclient.is_connected()) {
+            if (MQTTclient.connected()) {
                 doc["mqtt"]["status"] = "Connected";
             } else {
                 doc["mqtt"]["status"] = "Disconnected";
@@ -4323,10 +4283,6 @@ void setup() {
     // Uploading a new firmware through USB will however update OTA0, and you will not notice any changes...
     WiFiSetup();
 
-#ifndef MQTT_DISABLED
-    SetupMQTTClient();      // setup MQTT client
-#endif
-
     // Set eModbus LogLevel to 1, to suppress possible E5 errors
     MBUlogLvl = LOG_LEVEL_CRITICAL;
     ConfigureModbusMode(255);
@@ -4335,7 +4291,13 @@ void setup() {
     GLCD_init();
 
     CP_ON;           // CP signal ACTIVE
-          
+
+#ifndef MQTT_DISABLED
+    // Setup MQTT client
+    MQTTclient.begin(client);
+    SetupMQTTClient();
+#endif
+
 }
 
 void loop() {
