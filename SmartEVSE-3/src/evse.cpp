@@ -2359,6 +2359,14 @@ void mqttPublishData()
         MQTTclient.publish(MQTTprefix + "/EVInitialSoC", String(InitialSoC), true, 0);
         MQTTclient.publish(MQTTprefix + "/EVComputedSoC", String(ComputedSoC), true, 0);
     }
+    else
+    {
+        if (WiFi.status() == WL_CONNECTED)
+        {
+            // Setup MQTT client again so we can reconnect
+            SetupMQTTClient();
+        }
+    }
 }
 #endif
 
