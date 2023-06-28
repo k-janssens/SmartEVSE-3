@@ -255,8 +255,8 @@
             }
 
             if (data.mqtt && !mqttEditMode) {
-                $('#mqtt_broker_host').val(data.mqtt.broker_host);
-                $('#mqtt_broker_port').val(data.mqtt.broker_port);
+                $('#mqtt_host').val(data.mqtt.broker_host);
+                $('#mqtt_port').val(data.mqtt.broker_port);
                 $('#mqtt_username').val(data.mqtt.username);
                 $('#mqtt_password').val(data.mqtt.password);
                 $('#mqtt_topic_prefix').val(data.mqtt.topic_prefix);
@@ -814,15 +814,15 @@
                         }
                     }
                     function configureMqtt() {
-                        var mqtt_broker_host=$('#mqtt_broker_host').val();
-                        var mqtt_broker_port=$('#mqtt_broker_port').val();
+                        var mqtt_host=$('#mqtt_host').val();
+                        var mqtt_port=$('#mqtt_port').val();
                         var mqtt_username=$('#mqtt_username').val();
                         var mqtt_password=$('#mqtt_password').val();
                         var mqtt_topic_prefix=$('#mqtt_topic_prefix').val();
 
-                        if (mqtt_broker_host && mqtt_broker_port) {
-                            $.post( "/settings?mqtt_update=1&mqtt_broker_host=" + mqtt_broker_host +
-                                "&mqtt_broker_port=" + mqtt_broker_port + "&mqtt_username=" + mqtt_username +
+                        if (mqtt_host && mqtt_port) {
+                            $.post( "/settings?mqtt_update=1&mqtt_host=" + mqtt_host +
+                                "&mqtt_port=" + mqtt_port + "&mqtt_username=" + mqtt_username +
                                 "&mqtt_password=" + mqtt_password + "&mqtt_topic_prefix=" + mqtt_topic_prefix);
                             alert('Settings applied');
                             toggleMqttEdit();
@@ -950,8 +950,8 @@
                                         <div class="col">
                                             <button onclick="toggleMqttEdit()" style="display:inline-block;" id="edit_mqtt_button">Edit Settings</button>
                                             <div class="mqtt_settings" style="display:none">
-                                                <label>Host: <input id="mqtt_broker_host"></label>
-                                                <label>Port: <input id="mqtt_broker_port"></label>
+                                                <label>Host: <input id="mqtt_host"></label>
+                                                <label>Port: <input id="mqtt_port"></label>
                                                 <label>Username: <input id="mqtt_username"></label>
                                                 <label>Password: <input id="mqtt_password"></label>
                                                 <label>Topic Prefix: <input id="mqtt_topic_prefix"></label>

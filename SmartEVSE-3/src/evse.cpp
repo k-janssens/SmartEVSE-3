@@ -69,8 +69,8 @@ String APhostname = "SmartEVSE-" + String( MacId() & 0xffff, 10);           // S
 String MQTTuser;
 String MQTTpassword;
 String MQTTprefix = APhostname;
-String MQTTbrokerHost = "";
-uint16_t MQTTbrokerPort;
+String MQTTHost = "";
+uint16_t MQTTPort;
 WiFiClient client;
 MQTTClient MQTTclient;
 bool MQTTconfigured = false;
@@ -630,10 +630,10 @@ void setMode(uint8_t NewMode) {
         if ((Mode != MODE_SOLAR && NewMode == MODE_SOLAR) || (Mode == MODE_SOLAR && NewMode != MODE_SOLAR)) {
             //we are switching from non-solar to solar
             //since we EnableC2 == SOLAR_OFF C2 is turned On now, and should be turned off
-            setAccess(0);                                                       //switch to OFF
+            setAccess(false);                                                       //switch to OFF
             if (LoadBl == 1) ModbusWriteSingleRequest(BROADCAST_ADR, 0x0003, NewMode);
             Mode = NewMode;
-            setAccess(1);
+            setAccess(true);
             return;
         }
     }
@@ -2182,7 +2182,7 @@ void mqtt_receive_callback(const String &topic, const String &payload)
             ToModemWaitStateTimer = 0;
             ToModemDoneStateTimer = 0;
             LeaveModemDoneStateTimer = 0;
-            setAccess(0);
+            setAccess(false);
         }
 
         write_settings();
@@ -2190,9 +2190,9 @@ void mqtt_receive_callback(const String &topic, const String &payload)
     else if (topic == MQTTprefix + "/Set/Access")
     {
         // Only accept explicit values
-        if (payload == "1" || payload == "YES" || payload == "ON") {
+        if (payload == "1" || payload == "ALLOW") {
             setAccess(1);
-        } else if (payload == "0" || payload == "NO" || payload == "OFF") {
+        } else if (payload == "0" || payload == "DENY") {
             setAccess(0);
         }
     }
@@ -2301,13 +2301,13 @@ void SetupMQTTClient()
     }
 
     // No need to attempt connections if we aren't configured
-    if (MQTTbrokerHost == "")
+    if (MQTTHost == "")
     {
         return;
     }
 
     // Setup and connect MQTT client instance
-    MQTTclient.setHost(MQTTbrokerHost.c_str(), MQTTbrokerPort);
+    MQTTclient.setHost(MQTTHost.c_str(), MQTTPort);
 
     if (MQTTuser != "" && MQTTpassword != "")
     {
@@ -2315,6 +2315,9 @@ void SetupMQTTClient()
     } else {
         MQTTclient.connect(APhostname.c_str());
     }
+
+    // Keepalive every 15s
+    MQTTclient.setKeepAlive(15);
 
     if (MQTTclient.connected())
     {
@@ -2336,12 +2339,12 @@ void mqttPublishData()
     {
         MQTTclient.publish(MQTTprefix + "/EVSEUptime", String((esp_timer_get_time() / 1000000)), false, 0);
         MQTTclient.publish(MQTTprefix + "/EVSETemp", String(TempEVSE), false, 0);
-        MQTTclient.publish(MQTTprefix + "/C2Enabled", String(EnableC2), true, 0);
+        MQTTclient.publish(MQTTprefix + "/EnableC2", String(EnableC2), true, 0);
         MQTTclient.publish(MQTTprefix + "/Mode", getModeName(Mode), true, 0);
         MQTTclient.publish(MQTTprefix + "/ChargeCurrent", String(ChargeCurrent), true, 0);
         MQTTclient.publish(MQTTprefix + "/OverrideCurrent", String(OverrideCurrent), true, 0);
         MQTTclient.publish(MQTTprefix + "/Access", StrAccessBit[Access_bit], true, 0);
-        MQTTclient.publish(MQTTprefix + "/RFIDStatus", getRFIDStatusWeb(RFIDstatus), true, 0);
+        MQTTclient.publish(MQTTprefix + "/RFID", getRFIDStatusWeb(RFIDstatus), true, 0);
         MQTTclient.publish(MQTTprefix + "/State", getStateNameWeb(State), true, 0);
         MQTTclient.publish(MQTTprefix + "/Error", getErrorNameWeb(ErrorFlags), true, 0);
         MQTTclient.publish(MQTTprefix + "/IrmsL1", String(Irms[0]), false, 0);
@@ -2350,11 +2353,11 @@ void mqttPublishData()
         MQTTclient.publish(MQTTprefix + "/IrmsEVL1", String(Irms_EV[0]), false, 0);
         MQTTclient.publish(MQTTprefix + "/IrmsEVL2", String(Irms_EV[1]), false, 0);
         MQTTclient.publish(MQTTprefix + "/IrmsEVL3", String(Irms_EV[2]), false, 0);
-        MQTTclient.publish(MQTTprefix + "/HomeBatteryCurrent", String(homeBatteryCurrent).c_str(), false, 0);
-        MQTTclient.publish(MQTTprefix + "/EVConnected", (pilot != PILOT_12V) ? "1" : "0", true, 0);
-        MQTTclient.publish(MQTTprefix + "/EVEnergyCharged", String(EnergyCharged).c_str(), true, 0);
-        MQTTclient.publish(MQTTprefix + "/EVComputedSoC", String(ComputedSoC).c_str(), true, 0);
-        
+        MQTTclient.publish(MQTTprefix + "/HomeBatteryCurrent", String(homeBatteryCurrent), false, 0);
+        MQTTclient.publish(MQTTprefix + "/EVConnected", (pilot != PILOT_12V) ? "YES" : "NO", true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVEnergyCharged", String(EnergyCharged), true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVInitialSoC", String(InitialSoC), true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVComputedSoC", String(ComputedSoC), true, 0);
     }
 }
 #endif
@@ -2639,7 +2642,7 @@ void Timer1S(void * parameter) {
         // Process MQTT data
         MQTTclient.loop();
 
-        if (lastMqttUpdate++ >= 10) {
+        if (MQTTconfigured && lastMqttUpdate++ >= 10) {
             // Publish latest data, every 10 seconds
             // We will try to publish data faster if something has changed
             mqttPublishData();
@@ -3211,8 +3214,8 @@ void read_settings(bool write) {
         MQTTpassword = preferences.getString("MQTTpassword");
         MQTTuser = preferences.getString("MQTTuser");
         MQTTprefix = preferences.getString("MQTTprefix", APhostname);
-        MQTTbrokerHost = preferences.getString("MQTTbrokerHost", "");
-        MQTTbrokerPort = preferences.getUShort("MQTTbrokerPort", 1883);
+        MQTTHost = preferences.getString("MQTTHost", "");
+        MQTTPort = preferences.getUShort("MQTTPort", 1883);
 #endif
 
         preferences.end();                                  
@@ -3276,8 +3279,8 @@ void write_settings(void) {
     preferences.putString("MQTTpassword", MQTTpassword);
     preferences.putString("MQTTuser", MQTTuser);
     preferences.putString("MQTTprefix", MQTTprefix);
-    preferences.putString("MQTTbrokerHost", MQTTbrokerHost);
-    preferences.putUShort("MQTTbrokerPort", MQTTbrokerPort);
+    preferences.putString("MQTTHost", MQTTHost);
+    preferences.putUShort("MQTTPort", MQTTPort);
 #endif
 
     preferences.end();
@@ -3519,8 +3522,8 @@ void StartwebServer(void) {
         doc["car_modem"]["computed_soc"] = ComputedSoC; 
 
 #ifndef MQTT_DISABLED
-        doc["mqtt"]["broker_host"] = MQTTbrokerHost;
-        doc["mqtt"]["broker_port"] = MQTTbrokerPort;
+        doc["mqtt"]["host"] = MQTTHost;
+        doc["mqtt"]["port"] = MQTTPort;
         doc["mqtt"]["topic_prefix"] = MQTTprefix;
         doc["mqtt"]["username"] = MQTTuser;
         doc["mqtt"]["password_set"] = MQTTpassword != "";
@@ -3662,7 +3665,7 @@ void StartwebServer(void) {
                     ToModemWaitStateTimer = 0;
                     ToModemDoneStateTimer = 0;
                     LeaveModemDoneStateTimer = 0;
-                    setAccess(0);
+                    setAccess(false);
                     break;
                 case 1:
                     setMode(MODE_NORMAL);
@@ -3742,15 +3745,15 @@ void StartwebServer(void) {
         if(request->hasParam("mqtt_update")) {
             if (request->getParam("mqtt_update")->value().toInt() == 1) {
 
-                if(request->hasParam("mqtt_broker_host")) {
-                    MQTTbrokerHost = request->getParam("mqtt_broker_host")->value();
-                    doc["mqtt_broker_host"] = MQTTbrokerHost;
+                if(request->hasParam("mqtt_host")) {
+                    MQTTHost = request->getParam("mqtt_host")->value();
+                    doc["mqtt_host"] = MQTTHost;
                 }
 
-                if(request->hasParam("mqtt_broker_port")) {
-                    MQTTbrokerPort = request->getParam("mqtt_broker_port")->value().toInt();
-                    if (MQTTbrokerPort == 0) MQTTbrokerPort = 1883;
-                    doc["mqtt_broker_port"] = MQTTbrokerPort;
+                if(request->hasParam("mqtt_port")) {
+                    MQTTPort = request->getParam("mqtt_port")->value().toInt();
+                    if (MQTTPort == 0) MQTTPort = 1883;
+                    doc["mqtt_port"] = MQTTPort;
                 }
 
                 if(request->hasParam("mqtt_topic_prefix")) {
@@ -4314,7 +4317,7 @@ void loop() {
         DelayedStartTime.diff = DelayedStartTime.epoch2 - (mktime(localtime(&now)) - EPOCH2_OFFSET);
         if (DelayedStartTime.diff > 0) {
             if (Access_bit != 0 && (DelayedStopTime.epoch2 == 0 || DelayedStopTime.epoch2 > DelayedStartTime.epoch2))
-                setAccess(0);                         //switch to OFF, we are Delayed Charging
+                setAccess(false);                         //switch to OFF, we are Delayed Charging
         }
         else {
             //starttime is in the past so we are NOT Delayed Charging, or we are Delayed Charging but the starttime has passed!
@@ -4322,7 +4325,7 @@ void loop() {
                 DelayedStartTime.epoch2 += 24 * 3600;                           //add 24 hours so we now have a new starttime
             else
                 DelayedStartTime.epoch2 = DELAYEDSTARTTIME;
-            setAccess(1);
+            setAccess(true);
         }
     }
     //only update StopTime.diff if starttime has already passed
@@ -4336,7 +4339,7 @@ void loop() {
                 DelayedStopTime.epoch2 += 24 * 3600;                        //add 24 hours so we now have a new starttime
             else
                 DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
-            setAccess(0);                         //switch to OFF
+            setAccess(false);                         //switch to OFF
         }
     }
 
