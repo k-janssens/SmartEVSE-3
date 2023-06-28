@@ -2217,6 +2217,7 @@ void Timer1S(void * parameter) {
         if (State == STATE_MODEM_DENIED){
             if (LeaveModemDeniedStateTimer) LeaveModemDeniedStateTimer--;
             else{
+                LeaveModemDeniedStateTimer = -1;           // reset ModemStateDeniedTimer
                 CP_ON;
                 setState(STATE_A);                         // switch to STATE_MODEM_REQUEST
                 GLCD();                                                // Re-init LCD (200ms delay)    
