@@ -45,10 +45,6 @@ MQTTClient MQTTclient;
 RemoteDebug Debug;
 #endif
 
-#ifndef MQTT_DISABLED
-#include <MQTT.h>
-#endif
-
 const char* NTP_SERVER = "europe.pool.ntp.org";        // only one server is supported
 
 // Specification of the Time Zone string:
