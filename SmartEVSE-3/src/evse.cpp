@@ -629,10 +629,10 @@ void setMode(uint8_t NewMode) {
         if ((Mode != MODE_SOLAR && NewMode == MODE_SOLAR) || (Mode == MODE_SOLAR && NewMode != MODE_SOLAR)) {
             //we are switching from non-solar to solar
             //since we EnableC2 == SOLAR_OFF C2 is turned On now, and should be turned off
-            setAccess(false);                                                       //switch to OFF
+            setAccess(0);                                                       //switch to OFF
             if (LoadBl == 1) ModbusWriteSingleRequest(BROADCAST_ADR, 0x0003, NewMode);
             Mode = NewMode;
-            setAccess(true);
+            setAccess(1);
             return;
         }
     }
@@ -3657,7 +3657,7 @@ void StartwebServer(void) {
                     ToModemWaitStateTimer = 0;
                     ToModemDoneStateTimer = 0;
                     LeaveModemDoneStateTimer = 0;
-                    setAccess(false);
+                    setAccess(0);
                     break;
                 case 1:
                     setMode(MODE_NORMAL);
@@ -4309,7 +4309,7 @@ void loop() {
         DelayedStartTime.diff = DelayedStartTime.epoch2 - (mktime(localtime(&now)) - EPOCH2_OFFSET);
         if (DelayedStartTime.diff > 0) {
             if (Access_bit != 0 && (DelayedStopTime.epoch2 == 0 || DelayedStopTime.epoch2 > DelayedStartTime.epoch2))
-                setAccess(false);                         //switch to OFF, we are Delayed Charging
+                setAccess(0);                         //switch to OFF, we are Delayed Charging
         }
         else {
             //starttime is in the past so we are NOT Delayed Charging, or we are Delayed Charging but the starttime has passed!
@@ -4317,7 +4317,7 @@ void loop() {
                 DelayedStartTime.epoch2 += 24 * 3600;                           //add 24 hours so we now have a new starttime
             else
                 DelayedStartTime.epoch2 = DELAYEDSTARTTIME;
-            setAccess(true);
+            setAccess(1);
         }
     }
     //only update StopTime.diff if starttime has already passed
@@ -4331,7 +4331,7 @@ void loop() {
                 DelayedStopTime.epoch2 += 24 * 3600;                        //add 24 hours so we now have a new starttime
             else
                 DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
-            setAccess(false);                         //switch to OFF
+            setAccess(0);                         //switch to OFF
         }
     }
 
