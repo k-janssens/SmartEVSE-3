@@ -29,10 +29,6 @@
 #include <driver/uart.h>
 #include <soc/rtc_io_struct.h>
 
-#ifndef MQTT_DISABLED
-#include <MQTT.h>
-#endif
-
 #include "evse.h"
 #include "glcd.h"
 #include "utils.h"
@@ -41,6 +37,10 @@
 
 #ifndef DEBUG_DISABLED
 RemoteDebug Debug;
+#endif
+
+#ifndef MQTT_DISABLED
+#include <MQTT.h>
 #endif
 
 const char* NTP_SERVER = "europe.pool.ntp.org";        // only one server is supported
