@@ -2436,9 +2436,9 @@ void Timer1S(void * parameter) {
                     ModemStage = 1;
 
                     setState(STATE_B);                                     // switch to STATE_ACTSTART
-                    GLCD();                                                // Re-init LCD (200ms delay)    
+                    GLCD();                                                // Re-init LCD (200ms delay)
                 } else {
-                    // We actually do not want to continue charging and re-start at modem request after 60s 
+                    // We actually do not want to continue charging and re-start at modem request after 60s
                     ModemStage = 0;
                     LeaveModemDeniedStateTimer = 60;
 
@@ -2448,7 +2448,7 @@ void Timer1S(void * parameter) {
 
                     // Change to MODEM_DENIED state
                     setState(STATE_MODEM_DENIED);
-                    GLCD();                                                // Re-init LCD (200ms delay)    
+                    GLCD();                                                // Re-init LCD (200ms delay)
                 }
             }
         }
@@ -2459,7 +2459,7 @@ void Timer1S(void * parameter) {
                 LeaveModemDeniedStateTimer = -1;           // reset ModemStateDeniedTimer
                 CP_ON;
                 setState(STATE_A);                         // switch to STATE_MODEM_REQUEST
-                GLCD();                                                // Re-init LCD (200ms delay)    
+                GLCD();                                                // Re-init LCD (200ms delay)
             }
         }
 
@@ -3564,7 +3564,7 @@ void StartwebServer(void) {
         doc["ev_state"]["full_soc"] = FullSoC;
         doc["ev_state"]["energy_capacity"] = EnergyCapacity > 0 ? round(EnergyCapacity / 100)/10 : -1; //in kWh, precision 1 decimal;
         doc["ev_state"]["energy_request"] = EnergyRequest > 0 ? round(EnergyRequest / 100)/10 : -1; //in kWh, precision 1 decimal
-        doc["ev_state"]["computed_soc"] = ComputedSoC; 
+        doc["ev_state"]["computed_soc"] = ComputedSoC;
         doc["ev_state"]["evccid"] = EVCCID;
 
 #ifdef MQTT
@@ -3990,7 +3990,7 @@ void StartwebServer(void) {
 
         if (energy_request >= EnergyRequest) // Only update if we received it, since sometimes it's there, sometimes it's not
             EnergyRequest = energy_request;
-        
+
         if (current_soc >= 0 && current_soc <= 100) {
             // We set the InitialSoC for our own calculations
             InitialSoC = current_soc;
