@@ -35,6 +35,12 @@
 #include "OneWire.h"
 #include "modbus.h"
 
+#ifdef MQTT
+#include <MQTT.h>
+WiFiClient client;
+MQTTClient MQTTclient;
+#endif
+
 #ifndef DEBUG_DISABLED
 RemoteDebug Debug;
 #endif
@@ -60,6 +66,19 @@ AsyncWebServer webServer(80);
 AsyncDNSServer dnsServer;
 String APhostname = "SmartEVSE-" + String( MacId() & 0xffff, 10);           // SmartEVSE access point Name = SmartEVSE-xxxxx
 
+#ifdef MQTT
+// MQTT connection info
+String MQTTuser;
+String MQTTpassword;
+String MQTTprefix = APhostname;
+String MQTTHost = "";
+uint16_t MQTTPort;
+
+bool MQTTconfigured = false;
+TaskHandle_t MqttTaskHandle = NULL;
+uint8_t lastMqttUpdate = 0;
+#endif
+
 ESPAsync_WiFiManager ESPAsync_wifiManager(&webServer, &dnsServer, APhostname.c_str());
 
 // SSID and PW for your Router
@@ -82,6 +101,10 @@ struct ModBus MB;          // Used by SmartEVSE fuctions
 
 const char StrStateName[15][13] = {"A", "B", "C", "D", "COMM_B", "COMM_B_OK", "COMM_C", "COMM_C_OK", "Activate", "B1", "C1", "MODEM1", "MODEM2", "MODEM_OK", "MODEM_DENIED"};
 const char StrStateNameWeb[15][17] = {"Ready to Charge", "Connected to EV", "Charging", "D", "Request State B", "State B OK", "Request State C", "State C OK", "Activate", "Charging Stopped", "Stop Charging", "Modem Setup", "Modem Request", "Modem Done", "Modem Denied"};
+const char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
+const char StrMode[3][8] = {"Normal", "Smart", "Solar"};
+const char StrAccessBit[2][6] = {"Deny", "Allow"};
+const char StrRFIDStatusWeb[8][20] = {"Ready to read card","Present", "Card Stored", "Card Deleted", "Card already stored", "Card not in storage", "Card Storage full", "Invalid" };
 
 // Global data
 
@@ -549,7 +572,20 @@ const char * getStateNameWeb(uint8_t StateCode) {
     else return "NOSTATE";    
 }
 
+const char * getModeName(uint8_t mode) {
+    if (Access_bit == 0) {
+        return "Off";
+    }
+    if(mode < 3) return StrMode[mode];
+    else return "";
+}
 
+const char * getRFIDStatusWeb(uint8_t RFIDStatusCode) {
+    if (RFIDReader) {
+        if (RFIDStatusCode < 8) return StrRFIDStatusWeb[RFIDStatusCode];
+        return "NOSTATUS";
+    } else return "Not Installed";
+}
 
 
 uint8_t getErrorId(uint8_t ErrorCode) {
@@ -565,7 +601,6 @@ uint8_t getErrorId(uint8_t ErrorCode) {
 
 const char * getErrorNameWeb(uint8_t ErrorCode) {
     uint8_t count = 0;
-    const static char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
     count = getErrorId(ErrorCode);
     if(count < 9) return StrErrorNameWeb[count];
     else return "Multiple Errors";
@@ -577,10 +612,16 @@ const char * getErrorNameWeb(uint8_t ErrorCode) {
  * @param uint8_t Mode
  */
 void setMode(uint8_t NewMode) {
-
     // If mainsmeter disabled we can only run in Normal Mode
     if (!MainsMeter && NewMode != MODE_NORMAL)
         return;
+
+    // Take care of extra conditionals/checks for custom features
+    setAccess(!DelayedStartTime.epoch2); //if DelayedStartTime not zero then we are Delayed Charging
+    if (NewMode == 2) {
+        // Reset OverrideCurrent if mode is SOLAR
+        OverrideCurrent = 0;
+    }
 
     // when switching modes, we just keep charging at the phases we were charging at;
     // it's only the regulation algorithm that is changing...
@@ -597,6 +638,11 @@ void setMode(uint8_t NewMode) {
             return;
         }
     }
+
+#ifdef MQTT
+    // Update MQTT faster
+    lastMqttUpdate = 10;
+#endif
 
     if (LoadBl == 1) ModbusWriteSingleRequest(BROADCAST_ADR, 0x0003, NewMode);
     Mode = NewMode;
@@ -640,7 +686,6 @@ uint8_t Force_Single_Phase_Charging() {                                         
 
 void setState(uint8_t NewState) {
     if (State != NewState) {
-        
         char Str[50];
         snprintf(Str, sizeof(Str), "#%02d:%02d:%02d STATE %s -> %s\n",timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, getStateName(State), getStateName(NewState) );
 
@@ -763,6 +808,11 @@ void setState(uint8_t NewState) {
     BalancedState[0] = NewState;
     State = NewState;
 
+#ifdef MQTT
+    // Update MQTT faster
+    lastMqttUpdate = 10;
+#endif
+
     // BacklightTimer = BACKLIGHT;                                                 // Backlight ON
 }
 
@@ -775,6 +825,11 @@ void setAccess(bool Access) {
     } else{
         CP_ON;
     }
+
+#ifdef MQTT
+    // Update MQTT faster
+    lastMqttUpdate = 10;
+#endif
 }
 
 /**
@@ -2140,6 +2195,190 @@ uint8_t PollEVNode = NR_EVSES;
 
 }
 
+#ifdef MQTT
+void mqtt_receive_callback(const String &topic, const String &payload) {
+    if (topic == MQTTprefix + "/Set/Mode") {
+        if (payload == "Off") {
+            ToModemWaitStateTimer = 0;
+            ToModemDoneStateTimer = 0;
+            LeaveModemDoneStateTimer = 0;
+            setAccess(0);
+        } else if (payload == "Normal") {
+            setMode(MODE_NORMAL);
+        } else if (payload == "Solar") {
+            OverrideCurrent = 0;
+            setMode(MODE_SOLAR);
+        } else if (payload == "Smart") {
+            OverrideCurrent = 0;
+            setMode(MODE_SMART);
+        }
+    } else if (topic == MQTTprefix + "/Set/CurrentOverride") {
+        uint16_t RequestedCurrent = payload.toInt();
+        if (RequestedCurrent == 0) {
+            OverrideCurrent = 0;
+        } else if (Mode == MODE_NORMAL || Mode == MODE_SMART) {
+            if (RequestedCurrent >= (MinCurrent * 10) && RequestedCurrent <= (MaxCurrent * 10)) {
+                OverrideCurrent = RequestedCurrent;
+            }
+        }
+    } else if (topic == MQTTprefix + "/Set/CPPWMOverride") {
+        int pwm = payload.toInt();
+        if (pwm == -1) {
+            SetCPDuty(1024);
+            CP_ON;
+            CPDutyOverride = false;
+        } else if (pwm == 0) {
+            SetCPDuty(0);
+            CP_OFF;
+            CPDutyOverride = true;
+        } else if (pwm <= 1024) {
+            SetCPDuty(pwm);
+            CP_ON;
+            CPDutyOverride = true;
+        }
+    } else if (topic == MQTTprefix + "/Set/MainsMeter") {
+        if (MainsMeter != EM_API)
+            return;
+
+        int32_t L1, L2, L3;
+        int n = sscanf(payload.c_str(), "%d:%d:%d", &L1, &L2, &L3);
+
+        if (n == 3 && L1 < 1000 && L2 < 1000 && L3 < 1000) {
+            phasesLastUpdate = time(NULL);
+
+            if (LoadBl < 2)
+                timeout = 20;
+            if ((ErrorFlags & CT_NOCOMM))
+                ErrorFlags &= ~CT_NOCOMM; // Clear communication error, if present
+
+            Irms[0] = L1;
+            Irms[1] = L2;
+            Irms[2] = L3;
+
+            int batteryPerPhase = getBatteryCurrent() / 3;
+            Isum = 0;
+            for (int x = 0; x < 3; x++) {
+                IrmsOriginal[x] = Irms[x];
+                Irms[x] -= batteryPerPhase;
+                Isum = Isum + Irms[x];
+            }
+
+            UpdateCurrentData();
+        }
+    } else if (topic == MQTTprefix + "/Set/EVMeter") {
+        if (EVMeter != EM_API)
+            return;
+
+        int32_t L1, L2, L3, W, WH;
+        int n = sscanf(payload.c_str(), "%d:%d:%d:%d:%d", &L1, &L2, &L3, &W, &WH);
+
+        // We expect 5 values (and accept -1 for unknown values)
+        if (n == 5) {
+            if ((L1 > -1 && L1 < 1000) && (L2 > -1 && L2 < 1000) && (L3 > -1 && L3 < 1000)) {
+                // RMS currents
+                Irms_EV[0] = L1;
+                Irms_EV[1] = L2;
+                Irms_EV[2] = L3;
+
+                UpdateCurrentData();
+            }
+
+            if (W > -1) {
+                // Power measurement
+                PowerMeasured = W;
+            }
+
+            if (WH > -1) {
+                // Energy measurement
+                EnergyEV = WH;
+                if (ResetKwh == 2)
+                    EnergyMeterStart = EnergyEV;             // At powerup, set EnergyEV to kwh meter value
+                EnergyCharged = EnergyEV - EnergyMeterStart; // Calculate Energy
+                RecomputeSoC();                              // Recalculate SoC
+            }
+        }
+    } else if (topic == MQTTprefix + "/Set/HomeBatteryCurrent") {
+        homeBatteryCurrent = payload.toInt();
+        homeBatteryLastUpdate = time(NULL);
+    }
+
+    // Make sure MQTT updates directly to prevent debounces
+    lastMqttUpdate = 10;
+}
+
+void SetupMQTTClient() {
+    // Disconnect existing connection if connected
+    if (MQTTclient.connected())
+        MQTTclient.disconnect();
+
+    // No need to attempt connections if we aren't configured
+    if (MQTTHost == "")
+        return;
+
+    // Setup and connect MQTT client instance
+    MQTTclient.setHost(MQTTHost.c_str(), MQTTPort);
+
+    if (MQTTuser != "" && MQTTpassword != "") {
+        MQTTclient.connect(APhostname.c_str(), MQTTuser.c_str(), MQTTpassword.c_str());
+    } else {
+        MQTTclient.connect(APhostname.c_str());
+    }
+
+    // Keepalive every 15s
+    MQTTclient.setKeepAlive(15);
+
+    if (MQTTclient.connected()) {
+        // Set up global subscribe callback
+        MQTTclient.onMessage(mqtt_receive_callback);
+
+        // Set up subscriptions
+        MQTTclient.subscribe(String(MQTTprefix + "/Set/#"));
+    }
+
+    MQTTconfigured = true;
+}
+
+void mqttPublishData() {
+    lastMqttUpdate = 0;
+
+    if (MQTTclient.connected()) {
+        MQTTclient.publish(MQTTprefix + "/ESPUptime", String((esp_timer_get_time() / 1000000)), false, 0);
+        MQTTclient.publish(MQTTprefix + "/ESPTemp", String(TempEVSE), false, 0);
+        MQTTclient.publish(MQTTprefix + "/Mode", getModeName(Mode), true, 0);
+        MQTTclient.publish(MQTTprefix + "/MaxCurrent", String(MaxCurrent * 10), true, 0);
+        MQTTclient.publish(MQTTprefix + "/ChargeCurrent", String(ChargeCurrent), true, 0);
+        MQTTclient.publish(MQTTprefix + "/ChargeCurrentOverride", String(OverrideCurrent), true, 0);
+        MQTTclient.publish(MQTTprefix + "/Access", String(StrAccessBit[Access_bit]), true, 0);
+        MQTTclient.publish(MQTTprefix + "/RFID", getRFIDStatusWeb(RFIDstatus), true, 0);
+        MQTTclient.publish(MQTTprefix + "/State", getStateNameWeb(State), true, 0);
+        MQTTclient.publish(MQTTprefix + "/Error", getErrorNameWeb(ErrorFlags), true, 0);
+        MQTTclient.publish(MQTTprefix + "/CPPWM", String(CurrentPWM), false, 0);
+        MQTTclient.publish(MQTTprefix + "/CPPWMOverride", String(CPDutyOverride ? String(CurrentPWM) : "-1"), true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVPlugState", (pilot != PILOT_12V) ? "Connected" : "Disconnected", true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVChargePower", String(PowerMeasured), false, 0);
+        MQTTclient.publish(MQTTprefix + "/EVChargeCurrent", String(ChargeCurrent), false, 0);
+        MQTTclient.publish(MQTTprefix + "/EVEnergyCharged", String(EnergyCharged), true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVInitialSoC", String(InitialSoC), true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVFullSoC", String(FullSoC), true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVComputedSoC", String(ComputedSoC), true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVCurrentL1", String(Irms_EV[0]), false, 0);
+        MQTTclient.publish(MQTTprefix + "/EVCurrentL2", String(Irms_EV[1]), false, 0);
+        MQTTclient.publish(MQTTprefix + "/EVCurrentL3", String(Irms_EV[2]), false, 0);
+        MQTTclient.publish(MQTTprefix + "/PVCurrentL1", String(PV[0] > 100 ? (uint) PV[0] / 100 : 0), false, 0);
+        MQTTclient.publish(MQTTprefix + "/PVCurrentL2", String(PV[1] > 100 ? (uint) PV[1] / 100 : 0), false, 0);
+        MQTTclient.publish(MQTTprefix + "/PVCurrentL3", String(PV[2] > 100 ? (uint) PV[2] / 100 : 0), false, 0);
+        MQTTclient.publish(MQTTprefix + "/MainsCurrentL1", String(Irms[0]), false, 0);
+        MQTTclient.publish(MQTTprefix + "/MainsCurrentL2", String(Irms[1]), false, 0);
+        MQTTclient.publish(MQTTprefix + "/MainsCurrentL3", String(Irms[2]), false, 0);
+        MQTTclient.publish(MQTTprefix + "/HomeBatteryCurrent", String(homeBatteryCurrent), false, 0);
+    } else {
+        if (WiFi.status() == WL_CONNECTED) {
+            // Setup MQTT client again so we can reconnect
+            SetupMQTTClient();
+        }
+    }
+}
+#endif
 
 // task 1000msTimer
 void Timer1S(void * parameter) {
@@ -2439,6 +2678,17 @@ void Timer1S(void * parameter) {
                    Switching_To_Single_Phase = FALSE;                           // we finished the switching process
             } //if Det... = 0
         } //if Detecting_Charging_Phases_Timer
+
+#ifdef MQTT
+        // Process MQTT data
+        MQTTclient.loop();
+
+        if (MQTTconfigured && lastMqttUpdate++ >= 10) {
+            // Publish latest data, every 10 seconds
+            // We will try to publish data faster if something has changed
+            mqttPublishData();
+        }
+#endif
 
         // Pause the task for 1 Sec
         vTaskDelay(1000 / portTICK_PERIOD_MS);
@@ -3002,6 +3252,14 @@ void read_settings(bool write) {
         strncpy(RequiredEVCCID, preferences.getString("RequiredEVCCID", "").c_str(), sizeof(RequiredEVCCID));
         maxTemp = preferences.getUShort("maxTemp", MAX_TEMPERATURE);
 
+#ifdef MQTT
+        MQTTpassword = preferences.getString("MQTTpassword");
+        MQTTuser = preferences.getString("MQTTuser");
+        MQTTprefix = preferences.getString("MQTTprefix", APhostname);
+        MQTTHost = preferences.getString("MQTTHost", "");
+        MQTTPort = preferences.getUShort("MQTTPort", 1883);
+#endif
+
         preferences.end();                                  
 
         if (write) write_settings();
@@ -3059,6 +3317,14 @@ void write_settings(void) {
     preferences.putUShort("Modem", Modem);
     preferences.putString("RequiredEVCCID", String(RequiredEVCCID));
     preferences.putUShort("maxTemp", maxTemp);
+
+#ifdef MQTT
+    preferences.putString("MQTTpassword", MQTTpassword);
+    preferences.putString("MQTTuser", MQTTuser);
+    preferences.putString("MQTTprefix", MQTTprefix);
+    preferences.putString("MQTTHost", MQTTHost);
+    preferences.putUShort("MQTTPort", MQTTPort);
+#endif
 
     preferences.end();
 
@@ -3276,21 +3542,7 @@ void StartwebServer(void) {
         doc["evse"]["state_id"] = State;
         doc["evse"]["error"] = error;
         doc["evse"]["error_id"] = errorId;
-
-        if (RFIDReader) {
-            switch(RFIDstatus) {
-                case 0: doc["evse"]["rfid"] = "Ready to read card"; break;
-                case 1: doc["evse"]["rfid"] = "Present"; break;
-                case 2: doc["evse"]["rfid"] = "Card Stored"; break;
-                case 3: doc["evse"]["rfid"] = "Card Deleted"; break;
-                case 4: doc["evse"]["rfid"] = "Card already stored"; break;
-                case 5: doc["evse"]["rfid"] = "Card not in storage"; break;
-                case 6: doc["evse"]["rfid"] = "Card Storage full"; break;
-                case 7: doc["evse"]["rfid"] = "Invalid"; break;
-            }
-         } else {
-             doc["evse"]["rfid"] = "Not Installed";
-         }
+        doc["evse"]["rfid"] = getRFIDStatusWeb(RFIDstatus);
 
         doc["settings"]["charge_current"] = Balanced[0];
         doc["settings"]["override_current"] = OverrideCurrent;
@@ -3315,6 +3567,24 @@ void StartwebServer(void) {
         doc["ev_state"]["computed_soc"] = ComputedSoC; 
         doc["ev_state"]["evccid"] = EVCCID;
 
+#ifdef MQTT
+        doc["mqtt"]["host"] = MQTTHost;
+        doc["mqtt"]["port"] = MQTTPort;
+        doc["mqtt"]["topic_prefix"] = MQTTprefix;
+        doc["mqtt"]["username"] = MQTTuser;
+        doc["mqtt"]["password_set"] = MQTTpassword != "";
+
+        if (MQTTconfigured) {
+            if (MQTTclient.connected()) {
+                doc["mqtt"]["status"] = "Connected";
+            } else {
+                doc["mqtt"]["status"] = "Disconnected";
+            }
+        } else {
+            doc["mqtt"]["status"] = "Unconfigured";
+        }
+#endif
+
         doc["home_battery"]["current"] = homeBatteryCurrent;
         doc["home_battery"]["last_update"] = homeBatteryLastUpdate;
 
@@ -3338,9 +3608,9 @@ void StartwebServer(void) {
         doc["phase_currents"]["L2"] = Irms[1];
         doc["phase_currents"]["L3"] = Irms[2];
         doc["phase_currents"]["last_data_update"] = phasesLastUpdate;
-        doc["phase_currents"]["charging_L1"] = Charging_Phase[0];
-        doc["phase_currents"]["charging_L2"] = Charging_Phase[1];
-        doc["phase_currents"]["charging_L3"] = Charging_Phase[2];
+        doc["phase_currents"]["charging_L1"] = (evstate == "Charging" ? Charging_Phase[0] : false);
+        doc["phase_currents"]["charging_L2"] = (evstate == "Charging" ? Charging_Phase[1] : false);
+        doc["phase_currents"]["charging_L3"] = (evstate == "Charging" ? Charging_Phase[2] : false);
         doc["phase_currents"]["original_data"]["TOTAL"] = IrmsOriginal[0] + IrmsOriginal[1] + IrmsOriginal[2];
         doc["phase_currents"]["original_data"]["L1"] = IrmsOriginal[0];
         doc["phase_currents"]["original_data"]["L2"] = IrmsOriginal[1];
@@ -3445,31 +3715,18 @@ void StartwebServer(void) {
                     setAccess(0);
                     break;
                 case 1:
-                    setAccess(!DelayedStartTime.epoch2);              //if DelayedStartTime not zero then we are Delayed Charging
                     setMode(MODE_NORMAL);
                     break;
                 case 2:
-                    if (MainsMeter) {
-                        OverrideCurrent = 0;
-                        setAccess(!DelayedStartTime.epoch2);
-                        setMode(MODE_SOLAR);
-                        break;
-                    }
+                    setMode(MODE_SOLAR);
+                    break;
                 case 3:
-                    if (MainsMeter) {
-                        setAccess(!DelayedStartTime.epoch2);
-                        setMode(MODE_SMART);
-                        break;
-                    }
+                    setMode(MODE_SMART);
+                    break;
                 default:
                     mode = "Value not allowed!";
             }
-            if (preferences.begin("settings", false) ) {                        //false = write mode
-                preferences.putUChar("Mode", Mode);
-                preferences.putULong("DelayedStartTime", DelayedStartTime.epoch2); //epoch2 only needs 4 bytes
-                preferences.putULong("DelayedStopTime", DelayedStopTime.epoch2);   //epoch2 only needs 4 bytes
-                preferences.end();
-            }
+
             doc["mode"] = mode;
         }
 
@@ -3561,6 +3818,52 @@ void StartwebServer(void) {
                 doc["required_evccid"] = "EVCCID too long (max 32 char)";
             }
         }
+
+#ifdef MQTT
+        if(request->hasParam("mqtt_update")) {
+            if (request->getParam("mqtt_update")->value().toInt() == 1) {
+
+                if(request->hasParam("mqtt_host")) {
+                    MQTTHost = request->getParam("mqtt_host")->value();
+                    doc["mqtt_host"] = MQTTHost;
+                }
+
+                if(request->hasParam("mqtt_port")) {
+                    MQTTPort = request->getParam("mqtt_port")->value().toInt();
+                    if (MQTTPort == 0) MQTTPort = 1883;
+                    doc["mqtt_port"] = MQTTPort;
+                }
+
+                if(request->hasParam("mqtt_topic_prefix")) {
+                    MQTTprefix = request->getParam("mqtt_topic_prefix")->value();
+                    if (!MQTTprefix || MQTTprefix == "") {
+                        MQTTprefix = APhostname;
+                    }
+                    doc["mqtt_topic_prefix"] = MQTTprefix;
+                }
+
+                if(request->hasParam("mqtt_username")) {
+                    MQTTuser = request->getParam("mqtt_username")->value();
+                    if (!MQTTuser || MQTTuser == "") {
+                        MQTTuser.clear();
+                    }
+                    doc["mqtt_username"] = MQTTuser;
+                }
+
+                if(request->hasParam("mqtt_password")) {
+                    MQTTpassword = request->getParam("mqtt_password")->value();
+                    if (!MQTTpassword || MQTTpassword == "") {
+                        MQTTpassword.clear();
+                    }
+                    doc["mqtt_password_set"] = (MQTTpassword != "");
+                }
+
+                SetupMQTTClient();
+                write_settings();
+            }
+        }
+#endif
+
         String json;
         serializeJson(doc, json);
 
@@ -4061,7 +4364,13 @@ void setup() {
     GLCD_init();
 
     CP_ON;           // CP signal ACTIVE
-          
+
+#ifdef MQTT
+    // Setup MQTT client
+    MQTTclient.begin(client);
+    SetupMQTTClient();
+#endif
+
 }
 
 void loop() {
