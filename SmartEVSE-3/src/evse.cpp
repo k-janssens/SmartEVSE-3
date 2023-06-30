@@ -2428,7 +2428,7 @@ void Timer1S(void * parameter) {
                 //  - State STATE_MODEM_DONE set the CP pin off, to reset connection with car. Since some cars don't support AC charging via ISO15118, SoC is extracted via DC. 
                 //  - Negotiation fails between pyPLC and car. Some cars then won't accept charge via AC it seems after, so we just "re-plug" and start charging without the modem communication protocol 
                 //  - State STATE_B will enable CP pin again, if disabled. 
-                // This stage we are now in is just before we enable CP_PIN and resume via STATE_B   
+                // This stage we are now in is just before we enable CP_PIN and resume via STATE_B
 
                 // Check whether the EVCCID matches the one required
                 if (strcmp(RequiredEVCCID, "") == 0 || strcmp(RequiredEVCCID, EVCCID) == 0) {
