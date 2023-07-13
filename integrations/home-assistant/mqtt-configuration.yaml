@@ -224,7 +224,7 @@ alias: .EVSE - Set Mode Selector from MQTT
 description: ""
 trigger:
   - platform: mqtt
-    topic: SmartEVSE-15780/Mode
+    topic: SmartEVSE-XXXXX/Mode
 condition:
   - condition: not
     conditions:
