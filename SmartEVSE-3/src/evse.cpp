@@ -2349,83 +2349,90 @@ void SetupMQTTClient() {
     //publish MQTT discovery topics
     //we need something to make all this JSON stuff readable, without doing all this assign and serialize stuff
 #define jsn(x, y) String(R"(")") + x + R"(" : ")" + y + R"(")"
-    //jsn(device_class, current) expands to:
-    // R"("device_class" : "current")"
+    //jsn(device_class, current) expands to: R"("device_class" : "current")"
 
 #define jsna(x, y) String(R"(, )") + jsn(x, y)
     //json add expansion, same as above but now with a comma prepended
 
-    //first all device stuff:
-    const String device_payload = String(R"("device": {)") + jsn("model","SmartEVSE v3") + jsna("identifiers", MQTTprefix) + jsna("name", MQTTprefix) +jsna("manufacturer","Stegen")+ "}";
-    //so entity can be sensor, switch, select etc.
-    //a device SmartEVSE-1001 consists of multiple entities
-    String entity_suffix, entity_name, optional_payload;
+    //first all device stuff:, using abbreviations found here: https://www.home-assistant.io/integrations/mqtt/#discovery-payload:
+    const String device_payload = String(R"("dev": {)") + jsn("mdl","SmartEVSE v3") + jsna("ids", MQTTprefix) + jsna("name", MQTTprefix) + jsna("mf","Stegen") + jsna("cu", "http://" + WiFi.localIP().toString().c_str()) + "}";
+    //a device SmartEVSE-1001 consists of multiple entities, and an entity can be sensor, switch, select etc.
+    String entity_suffix, entity_name, optional_payload, entity_domain;
 
     //some self-updating variables here:
 #define entity_id MQTTprefix + "-" + entity_suffix
 #define entity_path MQTTprefix + "/" + entity_suffix
 #define entity_name(x) entity_name = x; entity_suffix = entity_name; entity_suffix.replace(" ", "");
-#define announce(x) entity_name(x); MQTTclient.publish("homeassistant/sensor/" + entity_id + "/config",  "{" + jsn("name", entity_name) + jsna("state_topic", entity_path) + jsna("object_id", entity_id) + jsna("unique_id", entity_id) + "," + device_payload + optional_payload + "}", true, 0);
 
-    //now set the parameters for the next batch of entities:
-    optional_payload = jsna("device_class","current") + jsna("unit_of_measurement","A") + jsna("val_tpl", R"({{ value | int / 10 }})");
+    //create template to announce an entity in it's own domain:
+#define announce(x, entity_domain) entity_name(x); MQTTclient.publish("homeassistant/" + String(entity_domain) + "/" + entity_id + "/config",  "{" + jsn("name", entity_name) + jsna("obj_id", entity_id) + jsna("uniq_id", entity_id) + jsna("stat_t", entity_path) + "," + device_payload + optional_payload + "}", true, 0);
 
-    //now the sensor/switch/select = entity stuff:
-    announce("Charge Current");
-    announce("Charge Current Override");
-    announce("Max Current");
-    announce("EV Charge Current");
+    //set the parameters for and announce sensors with device class 'current':
+    optional_payload = jsna("dev_cla","current") + jsna("unit_of_meas","A") + jsna("val_tpl", R"({{ value | int / 10 }})");
+    announce("Charge Current", "sensor");
+    announce("Max Current", "sensor");
+    announce("EV Charge Current", "sensor");
     if (MainsMeter) {
-        announce("Mains Current L1");
-        announce("Mains Current L2");
-        announce("Mains Current L3");
+        announce("Mains Current L1", "sensor");
+        announce("Mains Current L2", "sensor");
+        announce("Mains Current L3", "sensor");
     };
     if (EVMeter) {
-        announce("EV Current L1");
-        announce("EV Current L2");
-        announce("EV Current L3");
+        announce("EV Current L1", "sensor");
+        announce("EV Current L2", "sensor");
+        announce("EV Current L3", "sensor");
     };
     if (PVMeter) {
-        announce("PV Current L1");
-        announce("PV Current L2");
-        announce("PV Current L3");
+        announce("PV Current L1", "sensor");
+        announce("PV Current L2", "sensor");
+        announce("PV Current L3", "sensor");
     };
     if (homeBatteryLastUpdate) {
-        announce("Home Battery Current");
+        announce("Home Battery Current", "sensor");
     };
 
     if (Modem) {
-        //now set the parameters for the next batch of entities:
-        optional_payload = jsna("unit_of_measurement","%") + jsna("val_tpl", R"({% if value | int > -1 %} {{ value | int / 10 }} {% endif %})");
-        announce("EV Initial SoC");
-        announce("EV Full SoC");
-        announce("EV Computed SoC");
+        //set the parameters for modem/SoC sensor entities:
+        optional_payload = jsna("unit_of_meas","%") + jsna("val_tpl", R"({% if value | int > -1 %} {{ value | int / 10 }} {% endif %})");
+        announce("EV Initial SoC", "sensor");
+        announce("EV Full SoC", "sensor");
+        announce("EV Computed SoC", "sensor");
     };
 
-    //now set the parameters for the next batch of entities:
+    //set the parameters for and announce sensor entities without device_class or unit_of_meas:
     optional_payload = "";
-    announce("EV Plug State");
-    announce("Mode");
-    announce("Access");
-    announce("Error");
-    announce("State");
-    announce("RFID");
+    announce("EV Plug State", "sensor");
+    announce("Mode", "sensor");
+    announce("Access", "sensor");
+    announce("Error", "sensor");
+    announce("State", "sensor");
+    announce("RFID", "sensor");
 
-    //now set the parameters for the next batch of entities:
-    optional_payload = jsna("device_class","temperature") + jsna("unit_of_measurement","°C");
-    //optional_payload = jsna("unit_of_measurement","°C");
-    announce("ESP Temp");
-
-    optional_payload = jsna("device_class","power") + jsna("unit_of_measurement","W");
-    announce("EV Charge Power");
-    optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh");
-    announce("EV Energy Charged");
+    //set the parameters for and announce other sensor entities:
+    optional_payload = jsna("dev_cla","temperature") + jsna("unit_of_meas","°C") + jsna("ent_cat", "diagnostic");
+    announce("ESP Temp", "sensor");
+    optional_payload = jsna("dev_cla","power") + jsna("unit_of_meas","W");
+    announce("EV Charge Power", "sensor");
+    optional_payload = jsna("dev_cla","energy") + jsna("unit_of_meas","Wh");
+    announce("EV Energy Charged", "sensor");
+    
     if (Modem) {
-        optional_payload = jsna("unit_of_measurement","%") + jsna("val_tpl", R"({{ (value | int / 1024 * 100) | round(0) }})");
-        announce("CP PWM");
-        optional_payload = jsna("device_class","current") + jsna("unit_of_measurement","A") + jsna("val_tpl", R"({% if value | int > -1 %} {{ (value | int / 1024 * 100) | round(0) }} {% else %} N/A {% endif %})");
-        announce("CP PWM Override");
+        optional_payload = jsna("unit_of_meas","%") + jsna("val_tpl", R"({{ (value | int / 1024 * 100) | round(0) }})");
+        announce("CP PWM", "sensor");
+
+        optional_payload = jsna("cmd_t", String(MQTTprefix + "/Set/CPPWMOverride")) + jsna("min", "-1") + jsna("max", "100") + jsna("mode","slider");
+        optional_payload += jsna("val_tpl", R"({{ value if (value | int == -1) else (value | int / 1024 * 100) | round }})") + jsna("cmd_tpl", R"({{  value if (value | int == -1) else (value | int * 1024 / 100) | round }})");
+        announce("CP PWM Override", "number");
     };
+
+    //set the parameters for and announce select entities, overriding automatic status_topic stat_t:
+    optional_payload = jsna("stat_t", String(MQTTprefix + "/Mode")) + jsna("cmd_t", String(MQTTprefix + "/Set/Mode")) +  String(R"(, "ops" : ["Off", "Normal", "Smart", "Solar"])");
+    announce("Mode Selector", "select");
+
+    //set the parameters for and announce number entities:
+    optional_payload = jsna("cmd_t", String(MQTTprefix + "/Set/CurrentOverride")) + jsna("min", "0") + jsna("max", MaxCurrent ) + jsna("mode","slider");
+    optional_payload += jsna("val_tpl", R"({{ value | int / 10 }})") + jsna("cmd_tpl", R"({{ value | int * 10 }})");
+    announce("Charge Current Override", "number");
 }
 
 void mqttPublishData() {
@@ -2434,7 +2441,7 @@ void mqttPublishData() {
     if (MQTTclient.connected()) {
         MQTTclient.publish(MQTTprefix + "/ESPUptime", String((esp_timer_get_time() / 1000000)), false, 0);
         MQTTclient.publish(MQTTprefix + "/ESPTemp", String(TempEVSE), false, 0);
-        MQTTclient.publish(MQTTprefix + "/Mode", Access_bit == 0 ? "OFF" : Mode > 3 ? "N/A" : StrMode[Mode], true, 0);
+        MQTTclient.publish(MQTTprefix + "/Mode", Access_bit == 0 ? "Off" : Mode > 3 ? "N/A" : StrMode[Mode], true, 0);
         MQTTclient.publish(MQTTprefix + "/MaxCurrent", String(MaxCurrent * 10), true, 0);
         MQTTclient.publish(MQTTprefix + "/ChargeCurrent", String(ChargeCurrent), true, 0);
         MQTTclient.publish(MQTTprefix + "/ChargeCurrentOverride", String(OverrideCurrent), true, 0);
@@ -2446,6 +2453,7 @@ void mqttPublishData() {
         MQTTclient.publish(MQTTprefix + "/EVChargePower", String(PowerMeasured), false, 0);
         MQTTclient.publish(MQTTprefix + "/EVChargeCurrent", String(ChargeCurrent), false, 0);
         MQTTclient.publish(MQTTprefix + "/EVEnergyCharged", String(EnergyCharged), true, 0);
+
         if (Modem) {
             MQTTclient.publish(MQTTprefix + "/CPPWM", String(CurrentPWM), false, 0);
             MQTTclient.publish(MQTTprefix + "/CPPWMOverride", String(CPDutyOverride ? String(CurrentPWM) : "-1"), true, 0);
@@ -2468,8 +2476,9 @@ void mqttPublishData() {
             MQTTclient.publish(MQTTprefix + "/MainsCurrentL2", String(Irms[1]), false, 0);
             MQTTclient.publish(MQTTprefix + "/MainsCurrentL3", String(Irms[2]), false, 0);
         };
-        if (homeBatteryLastUpdate)
+        if (homeBatteryLastUpdate) {
             MQTTclient.publish(MQTTprefix + "/HomeBatteryCurrent", String(homeBatteryCurrent), false, 0);
+        };
     } else {
         if (WiFi.status() == WL_CONNECTED) {
             // Setup MQTT client again so we can reconnect
