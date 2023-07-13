@@ -47,7 +47,6 @@ Make sure to have read the original README.md (e.g. on howto connect to wifi).
    Note that for this functionality you will need to be in Smart or Solar mode; it is no longer necessary to enable Load Balancing for this function.
 
 * Added wifi-debugging: if compiled in, you can debug SmartEVSE device by telnetting to it over your wifi connection
-* Small code optimisations, fixed some small bugs
 * Added EXPERIMENTAL use of Contactor 2 (C2);
     - one can add a second contactor (C2) that switches off 2 of the 3 phases of a three-phase Mains installation; this can be usefull if one wants to charge of off
       Solar; EV's have a minimal charge current of 6A, so switching off 2 phases allows you to charge with a current of 6-18A, while 3 phases have a minimum current
@@ -132,8 +131,23 @@ View API <a href="https://swagger-ui.serkri.be/" target="_blank">https://swagger
 
 Have an idea for the API? Edit it here <a href="https://swagger-editor.serkri.be/" target="_blank">https://swagger-editor.serkri.be/</a> and copy/paste it in a new issue with your request (https://github.com/serkri/SmartEVSE-3/issues)
 
+# MQTT support
+Your SmartEVSE can now export the most important data to your MQTT-server. Just fill in the configuration data on the webserver and the data will automatically be announced to your MQTT server.
+
 # Integration with Home Assistant
-If you want to integrate your SmartEVSE with Home Asisstant, please have a look at [the SmartEVSE `custom_component` for Home Assistant](https://github.com/dingo35/ha-SmartEVSEv3). This `custom_component` uses the API to share data from the SmartEVSE to Home Assistant, and enables you to set SmartEVSE settings from Home Assistant. You will need firmware version 1.5.2 or higher to use this integration.
+There are three options to integrate SmartEVSE with Home Assistant:
+* through the HA-integration - the easy way<br />
+
+    If you want to integrate your SmartEVSE with Home Asisstant, please have a look at [the SmartEVSE `custom_component` for Home Assistant](https://github.com/dingo35/ha-SmartEVSEv3). This `custom_component` uses the API to share data from the SmartEVSE to Home Assistant, and enables you to set SmartEVSE settings from Home Assistant. You will need firmware version 1.5.2 or higher to use this integration.
+
+* by manually configuring your configuration.yaml<br />
+
+    Its a lot of work, but you can have everything exactly your way. See examples in the integrations directory of our github repository.
+
+* by MQTT<br />
+
+    If you don't like the integration, e.g. because it only updates its data every 60 seconds, you might like to interface through MQTT; updates are done as soon as values change.... you can even mix it up by using both the integration AND the MQTT interface at the same time!
+
 
 # Modbus TCP bridge
 
@@ -141,7 +155,7 @@ Your MainsMeter, EVMeter and PVMeter will present themselves at port 502 of your
 So this makes it possible for you to use whatever modbus function you want on whatever modbus register you want. 
 The addresses on the tcp modbus are the same addresses as they are on the RTU modbus.
 
-E.g. my MainsMeter is at slave address 0x0a, so this command reads register 70decimal and following:
+E.g. my MainsMeter is at slave address 0x0a, so this command reads register 70decimal and following:<br />
 mbpoll -a10 -t 3:hex -r 70 -c 10 10.0.0.76
 
 # Simple Timer

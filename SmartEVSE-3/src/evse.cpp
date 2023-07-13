@@ -9,7 +9,20 @@
 #include <WiFi.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+
+#define USE_ESP_WIFIMANAGER_NTP true
+#define USING_AFRICA        false
+#define USING_AMERICA       false
+#define USING_ANTARCTICA    false
+#define USING_ASIA          false
+#define USING_ATLANTIC      false
+#define USING_AUSTRALIA     false
+#define USING_EUROPE        true
+#define USING_INDIAN        false
+#define USING_PACIFIC       false
+#define USING_ETC_GMT       false
 #include <ESPAsync_WiFiManager.h>
+
 #include <ESPmDNS.h>
 #include <Update.h>
 
@@ -35,23 +48,18 @@
 #include "OneWire.h"
 #include "modbus.h"
 
+#ifdef MQTT
+#include <MQTT.h>
+WiFiClient client;
+MQTTClient MQTTclient;
+#endif
+
 #ifndef DEBUG_DISABLED
 RemoteDebug Debug;
 #endif
 
-const char* NTP_SERVER = "europe.pool.ntp.org";        // only one server is supported
-
-// Specification of the Time Zone string:
-// http://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html
-// list of time zones: https://remotemonitoringsystems.ca/time-zone-abbreviations.php
-// more: https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
-//
-const char* TZ_INFO    = "CET-1CEST-2,M3.5.0/2,M10.5.0/3";      // Europe/Amsterdam
-//const char* TZ_INFO    = "GMT+0IST-1,M3.5.0/1,M10.5.0/2";     // Europe/Dublin
-//const char* TZ_INFO    = "EET-2EEST-3,M3.5.0/3,M10.5.0/4";    // Europe/Helsinki
-//const char* TZ_INFO    = "WET-0WEST-1,M3.5.0/1,M10.5.0/2";    // Europe/Lisbon
-//const char* TZ_INFO    = "GMT+0BST-1,M3.5.0/1,M10.5.0/2";     // Europe/London
-//const char* TZ_INFO    = "PST8PDT,M3.2.0,M11.1.0";            // USA, Los Angeles
+#define SNTP_GET_SERVERS_FROM_DHCP 1
+#include <sntp.h>
 
 struct tm timeinfo;
 
@@ -59,6 +67,19 @@ AsyncWebServer webServer(80);
 //AsyncWebSocket ws("/ws");           // data to/from webpage
 AsyncDNSServer dnsServer;
 String APhostname = "SmartEVSE-" + String( MacId() & 0xffff, 10);           // SmartEVSE access point Name = SmartEVSE-xxxxx
+
+#ifdef MQTT
+// MQTT connection info
+String MQTTuser;
+String MQTTpassword;
+String MQTTprefix = APhostname;
+String MQTTHost = "";
+uint16_t MQTTPort;
+
+bool MQTTconfigured = false;
+TaskHandle_t MqttTaskHandle = NULL;
+uint8_t lastMqttUpdate = 0;
+#endif
 
 ESPAsync_WiFiManager ESPAsync_wifiManager(&webServer, &dnsServer, APhostname.c_str());
 
@@ -80,8 +101,12 @@ static esp_adc_cal_characteristics_t * adc_chars_Temperature;
 
 struct ModBus MB;          // Used by SmartEVSE fuctions
 
-const char StrStateName[14][10] = {"A", "B", "C", "D", "COMM_B", "COMM_B_OK", "COMM_C", "COMM_C_OK", "Activate", "B1", "C1", "MODEM1", "MODEM2", "MODEM_OK"};
-const char StrStateNameWeb[14][17] = {"Ready to Charge", "Connected to EV", "Charging", "D", "Request State B", "State B OK", "Request State C", "State C OK", "Activate", "Charging Stopped", "Stop Charging", "Modem Setup", "Modem Request","Modem Done",};
+const char StrStateName[15][13] = {"A", "B", "C", "D", "COMM_B", "COMM_B_OK", "COMM_C", "COMM_C_OK", "Activate", "B1", "C1", "MODEM1", "MODEM2", "MODEM_OK", "MODEM_DENIED"};
+const char StrStateNameWeb[15][17] = {"Ready to Charge", "Connected to EV", "Charging", "D", "Request State B", "State B OK", "Request State C", "State C OK", "Activate", "Charging Stopped", "Stop Charging", "Modem Setup", "Modem Request", "Modem Done", "Modem Denied"};
+const char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
+const char StrMode[3][8] = {"Normal", "Smart", "Solar"};
+const char StrAccessBit[2][6] = {"Deny", "Allow"};
+const char StrRFIDStatusWeb[8][20] = {"Ready to read card","Present", "Card Stored", "Card Deleted", "Card already stored", "Card not in storage", "Card Storage full", "Invalid" };
 
 // Global data
 
@@ -95,8 +120,13 @@ uint8_t Mode = MODE;                                                        // E
 uint32_t CurrentPWM = 0;                                                    // Current PWM duty cycle value (0 - 1024)
 int8_t InitialSoC = -1;                                                     // State of charge of car
 int8_t FullSoC = -1;                                                        // SoC car considers itself fully charged
-int8_t BulkSoC = -1;                                                        // SoC car believes it's no longer fast charging
 int8_t ComputedSoC = -1;                                                    // Estimated SoC, based on charged kWh
+int8_t RemainingSoC = -1;                                                   // Remaining SoC, based on ComputedSoC
+int32_t EnergyCapacity = -1;                                                // Car's total battery capacity
+int32_t EnergyRequest = -1;                                                 // Requested amount of energy by car
+char EVCCID[32];                                                            // Car's EVCCID (EV Communication Controller Identifer)
+char RequiredEVCCID[32];                                                    // Required EVCCID before allowing charging
+
 bool CPDutyOverride = false;
 uint8_t Lock = LOCK;                                                        // Cable lock (0:Disable / 1:Solenoid / 2:Motor)
 uint16_t MaxCircuit = MAX_CIRCUIT;                                          // Max current of the EVSE circuit (A)
@@ -125,9 +155,10 @@ uint8_t Show_RFID = 0;
 #endif
 uint8_t WIFImode = WIFI_MODE;                                               // WiFi Mode (0:Disabled / 1:Enabled / 2:Start Portal)
 String APpassword = "00000000";
+String TZname = "";
 
 EnableC2_t EnableC2 = ENABLE_C2;                                            // Contactor C2
-Modem_t Modem = MODEM;                                                      // Is an ISO15118 modem installed (experimental)
+Modem_t Modem = NOTPRESENT;                                                 // Is an ISO15118 modem installed (experimental)
 uint16_t maxTemp = MAX_TEMPERATURE;
 
 int32_t Irms[3]={0, 0, 0};                                                  // Momentary current per Phase (23 = 2.3A) (resolution 100mA)
@@ -195,6 +226,7 @@ int8_t DisconnectTimeCounter = -1;                                          // C
 uint8_t ToModemWaitStateTimer = 0;                                          // Timer used from STATE_MODEM_REQUEST to STATE_MODEM_WAIT
 uint8_t ToModemDoneStateTimer = 0;                                          // Timer used from STATE_MODEM_WAIT to STATE_MODEM_DONE
 uint8_t LeaveModemDoneStateTimer = 0;                                       // Timer used from STATE_MODEM_DONE to other, usually STATE_B
+uint8_t LeaveModemDeniedStateTimer = 0;                                     // Timer used from STATE_MODEM_DENIED to STATE_B to re-try authentication
 uint8_t NoCurrent = 0;                                                      // counts overcurrent situations.
 uint8_t TestState = 0;
 uint8_t ModbusRequest = 0;                                                  // Flag to request Modbus information
@@ -384,7 +416,7 @@ void BlinkLed(void * parameter) {
                 BluePwm = 0;
             }
 
-        } else if (Access_bit == 0) {                                            // No Access, LEDs off
+        } else if (Access_bit == 0 || State == STATE_MODEM_DENIED) {                                            // No Access, LEDs off
             RedPwm = 0;
             GreenPwm = 0;
             BluePwm = 0;
@@ -533,17 +565,15 @@ uint8_t Pilot() {
  * @return uint8_t[] Name
  */
 const char * getStateName(uint8_t StateCode) {
-    if(StateCode < 14) return StrStateName[StateCode];
+    if(StateCode < 15) return StrStateName[StateCode];
     else return "NOSTATE";
 }
 
 
 const char * getStateNameWeb(uint8_t StateCode) {
-    if(StateCode < 14) return StrStateNameWeb[StateCode];
+    if(StateCode < 15) return StrStateNameWeb[StateCode];
     else return "NOSTATE";    
 }
-
-
 
 
 uint8_t getErrorId(uint8_t ErrorCode) {
@@ -559,7 +589,6 @@ uint8_t getErrorId(uint8_t ErrorCode) {
 
 const char * getErrorNameWeb(uint8_t ErrorCode) {
     uint8_t count = 0;
-    const static char StrErrorNameWeb[9][20] = {"None", "No Power Available", "Communication Error", "Temperature High", "Unused", "RCM Tripped", "Waiting for Solar", "Test IO", "Flash Error"};
     count = getErrorId(ErrorCode);
     if(count < 9) return StrErrorNameWeb[count];
     else return "Multiple Errors";
@@ -571,10 +600,16 @@ const char * getErrorNameWeb(uint8_t ErrorCode) {
  * @param uint8_t Mode
  */
 void setMode(uint8_t NewMode) {
-
     // If mainsmeter disabled we can only run in Normal Mode
     if (!MainsMeter && NewMode != MODE_NORMAL)
         return;
+
+    // Take care of extra conditionals/checks for custom features
+    setAccess(!DelayedStartTime.epoch2); //if DelayedStartTime not zero then we are Delayed Charging
+    if (NewMode == 2) {
+        // Reset OverrideCurrent if mode is SOLAR
+        OverrideCurrent = 0;
+    }
 
     // when switching modes, we just keep charging at the phases we were charging at;
     // it's only the regulation algorithm that is changing...
@@ -591,6 +626,11 @@ void setMode(uint8_t NewMode) {
             return;
         }
     }
+
+#ifdef MQTT
+    // Update MQTT faster
+    lastMqttUpdate = 10;
+#endif
 
     if (LoadBl == 1) ModbusWriteSingleRequest(BROADCAST_ADR, 0x0003, NewMode);
     Mode = NewMode;
@@ -634,7 +674,6 @@ uint8_t Force_Single_Phase_Charging() {                                         
 
 void setState(uint8_t NewState) {
     if (State != NewState) {
-        
         char Str[50];
         snprintf(Str, sizeof(Str), "#%02d:%02d:%02d STATE %s -> %s\n",timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec, getStateName(State), getStateName(NewState) );
 
@@ -660,6 +699,7 @@ void setState(uint8_t NewState) {
                 Node[0].MinCurrent = 0;                                         // Clear ChargeDelay when disconnected.
             }
 
+#ifdef MODEM
             if (DisconnectTimeCounter == -1){
                 DisconnectTimeCounter = 0;                                      // Start counting disconnect time. If longer than 60 seconds, throw DisconnectEvent
             }
@@ -679,12 +719,15 @@ void setState(uint8_t NewState) {
             CP_OFF;
             DisconnectTimeCounter = -1;                                         // Disable Disconnect timer. Car is connected
             LeaveModemDoneStateTimer = 5;                                       // Disconnect CP for 5 seconds, restart charging cycle but this time without the modem steps.
+#endif
             break;
         case STATE_B:
-            CP_ON;
+            if (Modem)
+                CP_ON;
             CONTACTOR1_OFF;
             CONTACTOR2_OFF;
-            DisconnectTimeCounter = -1;                                         // Disable Disconnect timer. Car is connected
+            if (Modem)
+                DisconnectTimeCounter = -1;                                         // Disable Disconnect timer. Car is connected
             timerAlarmWrite(timerA, PWM_95, false);                             // Enable Timer alarm, set to diode test (95%)
             SetCurrent(ChargeCurrent);                                          // Enable PWM
             break;      
@@ -757,18 +800,30 @@ void setState(uint8_t NewState) {
     BalancedState[0] = NewState;
     State = NewState;
 
+#ifdef MQTT
+    // Update MQTT faster
+    lastMqttUpdate = 10;
+#endif
+
     // BacklightTimer = BACKLIGHT;                                                 // Backlight ON
 }
 
 void setAccess(bool Access) {
     Access_bit = Access;
     if (Access == 0) {
-        CP_OFF;
+        if (Modem)
+            CP_OFF;
         if (State == STATE_C) setState(STATE_C1);                               // Determine where to switch to.
-        else if (State == STATE_B || State == STATE_MODEM_REQUEST || State == STATE_MODEM_WAIT || State == STATE_MODEM_DONE) setState(STATE_B1);
+        else if (State == STATE_B || State == STATE_MODEM_REQUEST || State == STATE_MODEM_WAIT || State == STATE_MODEM_DONE || State == STATE_MODEM_DENIED) setState(STATE_B1);
     } else{
-        CP_ON;
+        if (Modem)
+            CP_ON;
     }
+
+#ifdef MQTT
+    // Update MQTT faster
+    lastMqttUpdate = 10;
+#endif
 }
 
 /**
@@ -1220,6 +1275,7 @@ uint8_t setItemValue(uint8_t nav, uint16_t val) {
         case STATUS_MODE:
             // Do not change Charge Mode when set to Normal or Load Balancing is disabled
             if (Mode == 0 || LoadBl == 0) break;
+            // fall through
         case MENU_MODE:
             Mode = val;
             break;
@@ -1488,10 +1544,32 @@ void printStatus(void)
 }
 
 // Recompute State of Charge, in case we have a known initial state of charge
-// This function is called by kWh logic
-void RecomputeSoC(void){
-    if (InitialSoC > 0)
-        ComputedSoC = InitialSoC + (EnergyCharged / 280);
+// This function is called by kWh logic and after an EV state update through API, Serial or MQTT
+void RecomputeSoC(void) {
+    if (FullSoC > 0 && EnergyCapacity > 0) {
+        if (InitialSoC == FullSoC) {
+            // We're already at full SoC
+            ComputedSoC = FullSoC;
+            RemainingSoC = 0;
+        } else if (EnergyRequest > 0) {
+            // Attempt to use EnergyRequest to determine SoC with greater accuracy
+            // We're adding 50 Wh to EnergyCharged here to be sure we reach 100% ComputedSoC and compensate for losses
+            uint32_t RemainingEnergyWh = (EnergyCharged > 0 ? EnergyRequest - (EnergyCharged) : EnergyRequest);
+            if (RemainingEnergyWh > 0) {
+                ComputedSoC = FullSoC - (((double) RemainingEnergyWh / EnergyCapacity) * FullSoC);
+                RemainingSoC = FullSoC - ComputedSoC;
+                return;
+            } else {
+                ComputedSoC = FullSoC;
+                RemainingSoC = 0;
+            }
+        } else if (InitialSoC > 0) {
+            // Fall back to rough estimate based on InitialSoC if we do not know the requested energy
+            ComputedSoC = InitialSoC + (((double) EnergyCharged / EnergyCapacity) * FullSoC);
+            RemainingSoC = FullSoC - ComputedSoC;
+        }
+    }
+    // There's also the possibility an external API/app is used for SoC info. In such case, we allow setting ComputedSoC directly.
 }
 
 // EV disconnected from charger. Triggered after 60 seconds of disconnect
@@ -1501,8 +1579,10 @@ void DisconnectEvent(void){
     ModemStage = 0; // Enable Modem states again
     InitialSoC = -1;
     FullSoC = -1;
-    BulkSoC = -1;
+    RemainingSoC = -1;
     ComputedSoC = -1;
+    EnergyCapacity = -1;
+    strncpy(EVCCID, "", sizeof(EVCCID));
 }
 
 /**
@@ -1752,7 +1832,12 @@ void EVSEStates(void * parameter) {
                 if (!ResetKwh) ResetKwh = 1;                                    // when set, reset EV kWh meter on state B->C change.
             } else if ( pilot == PILOT_9V && ErrorFlags == NO_ERROR 
                 && ChargeDelay == 0 && Access_bit
+#ifdef MODEM
                 && State != STATE_COMM_B && State != STATE_MODEM_REQUEST && State != STATE_MODEM_WAIT && State != STATE_MODEM_DONE) {                                     // switch to State B ?
+
+#else
+                && State != STATE_COMM_B) {                                     // switch to State B ?
+#endif
                                                                                 // Allow to switch to state C directly if STATE_A_TO_C is set to PILOT_6V (see EVSE.h)
                 DiodeCheck = 0;
 
@@ -2002,6 +2087,7 @@ uint8_t PollEVNode = NR_EVSES;
                         break;
                     }
                     ModbusRequest++;
+                    // fall through
                 case 2:                                                         // Sensorbox or kWh meter that measures -all- currents
                     if (MainsMeter && MainsMeter != EM_API) {                   // we don't want modbus meter currents to conflict with EM_API currents
                         _LOG_D("ModbusRequest %u: Request MainsMeter Measurement\n", ModbusRequest);
@@ -2009,6 +2095,7 @@ uint8_t PollEVNode = NR_EVSES;
                         break;
                     }
                     ModbusRequest++;
+                    // fall through
                 case 3:
                     // Find next online SmartEVSE
                     do {
@@ -2023,6 +2110,7 @@ uint8_t PollEVNode = NR_EVSES;
                         break;
                     }
                     ModbusRequest++;
+                    // fall through
                 case 4:                                                         // EV kWh meter, Energy measurement (total charged kWh)
                     // Request Energy if EV meter is configured
                     if (Node[PollEVNode].EVMeter && Node[PollEVNode].EVMeter != EM_API) {
@@ -2031,6 +2119,7 @@ uint8_t PollEVNode = NR_EVSES;
                         break;
                     }
                     ModbusRequest++;
+                    // fall through
                 case 5:                                                         // EV kWh meter, Power measurement (momentary power in Watt)
                     // Request Power if EV meter is configured
                     if (Node[PollEVNode].EVMeter && Node[PollEVNode].EVMeter != EM_API) {
@@ -2038,6 +2127,7 @@ uint8_t PollEVNode = NR_EVSES;
                         break;
                     }
                     ModbusRequest++;
+                    // fall through
                 case 6:                                                         // Node 1
                 case 7:
                 case 8:
@@ -2050,6 +2140,7 @@ uint8_t PollEVNode = NR_EVSES;
                         break;
                     }
                     ModbusRequest = 12;
+                    // fall through
                 case 13:
                 case 14:
                 case 15:
@@ -2062,6 +2153,7 @@ uint8_t PollEVNode = NR_EVSES;
                         break;
                     }
                     ModbusRequest = 21;
+                    // fall through
                 case 20:                                                         // EV kWh meter, Current measurement
                     // Request Current if EV meter is configured
                     if (EVMeter && EVMeter != EM_API) {
@@ -2070,6 +2162,7 @@ uint8_t PollEVNode = NR_EVSES;
                         break;
                     }
                     ModbusRequest++;
+                    // fall through
                 case 21:
                     // Request active energy if Mainsmeter is configured
                     if (MainsMeter && MainsMeter != EM_API) {                   // EM_API does not support energy postings
@@ -2087,6 +2180,7 @@ uint8_t PollEVNode = NR_EVSES;
                         }
                     }
                     ModbusRequest++;
+                    // fall through
                 default:
                     if (Mode) {                                                 // Smart/Solar mode
                         if ((ErrorFlags & CT_NOCOMM) == 0) UpdateCurrentData();      // No communication error with Sensorbox /Kwh meter?
@@ -2110,6 +2204,280 @@ uint8_t PollEVNode = NR_EVSES;
 
 }
 
+#ifdef MQTT
+void mqtt_receive_callback(const String &topic, const String &payload) {
+    if (topic == MQTTprefix + "/Set/Mode") {
+        if (payload == "Off") {
+            ToModemWaitStateTimer = 0;
+            ToModemDoneStateTimer = 0;
+            LeaveModemDoneStateTimer = 0;
+            setAccess(0);
+        } else if (payload == "Normal") {
+            setMode(MODE_NORMAL);
+        } else if (payload == "Solar") {
+            OverrideCurrent = 0;
+            setMode(MODE_SOLAR);
+        } else if (payload == "Smart") {
+            OverrideCurrent = 0;
+            setMode(MODE_SMART);
+        }
+    } else if (topic == MQTTprefix + "/Set/CurrentOverride") {
+        uint16_t RequestedCurrent = payload.toInt();
+        if (RequestedCurrent == 0) {
+            OverrideCurrent = 0;
+        } else if (Mode == MODE_NORMAL || Mode == MODE_SMART) {
+            if (RequestedCurrent >= (MinCurrent * 10) && RequestedCurrent <= (MaxCurrent * 10)) {
+                OverrideCurrent = RequestedCurrent;
+            }
+        }
+    } else if (topic == MQTTprefix + "/Set/CPPWMOverride") {
+        int pwm = payload.toInt();
+        if (pwm == -1) {
+            SetCPDuty(1024);
+            CP_ON;
+            CPDutyOverride = false;
+        } else if (pwm == 0) {
+            SetCPDuty(0);
+            CP_OFF;
+            CPDutyOverride = true;
+        } else if (pwm <= 1024) {
+            SetCPDuty(pwm);
+            CP_ON;
+            CPDutyOverride = true;
+        }
+    } else if (topic == MQTTprefix + "/Set/MainsMeter") {
+        if (MainsMeter != EM_API)
+            return;
+
+        int32_t L1, L2, L3;
+        int n = sscanf(payload.c_str(), "%d:%d:%d", &L1, &L2, &L3);
+
+        if (n == 3 && L1 < 1000 && L2 < 1000 && L3 < 1000) {
+            phasesLastUpdate = time(NULL);
+
+            if (LoadBl < 2)
+                timeout = 20;
+            if ((ErrorFlags & CT_NOCOMM))
+                ErrorFlags &= ~CT_NOCOMM; // Clear communication error, if present
+
+            Irms[0] = L1;
+            Irms[1] = L2;
+            Irms[2] = L3;
+
+            int batteryPerPhase = getBatteryCurrent() / 3;
+            Isum = 0;
+            for (int x = 0; x < 3; x++) {
+                IrmsOriginal[x] = Irms[x];
+                Irms[x] -= batteryPerPhase;
+                Isum = Isum + Irms[x];
+            }
+
+            UpdateCurrentData();
+        }
+    } else if (topic == MQTTprefix + "/Set/EVMeter") {
+        if (EVMeter != EM_API)
+            return;
+
+        int32_t L1, L2, L3, W, WH;
+        int n = sscanf(payload.c_str(), "%d:%d:%d:%d:%d", &L1, &L2, &L3, &W, &WH);
+
+        // We expect 5 values (and accept -1 for unknown values)
+        if (n == 5) {
+            if ((L1 > -1 && L1 < 1000) && (L2 > -1 && L2 < 1000) && (L3 > -1 && L3 < 1000)) {
+                // RMS currents
+                Irms_EV[0] = L1;
+                Irms_EV[1] = L2;
+                Irms_EV[2] = L3;
+
+                UpdateCurrentData();
+            }
+
+            if (W > -1) {
+                // Power measurement
+                PowerMeasured = W;
+            }
+
+            if (WH > -1) {
+                // Energy measurement
+                EnergyEV = WH;
+                if (ResetKwh == 2)
+                    EnergyMeterStart = EnergyEV;             // At powerup, set EnergyEV to kwh meter value
+                EnergyCharged = EnergyEV - EnergyMeterStart; // Calculate Energy
+                RecomputeSoC();                              // Recalculate SoC
+            }
+        }
+    } else if (topic == MQTTprefix + "/Set/HomeBatteryCurrent") {
+        homeBatteryCurrent = payload.toInt();
+        homeBatteryLastUpdate = time(NULL);
+    }
+
+    // Make sure MQTT updates directly to prevent debounces
+    lastMqttUpdate = 10;
+}
+
+void SetupMQTTClient() {
+    // Disconnect existing connection if connected
+    if (MQTTclient.connected())
+        MQTTclient.disconnect();
+
+    // No need to attempt connections if we aren't configured
+    if (MQTTHost == "")
+        return;
+
+    // Setup and connect MQTT client instance
+    MQTTclient.setHost(MQTTHost.c_str(), MQTTPort);
+
+    if (MQTTuser != "" && MQTTpassword != "") {
+        MQTTclient.connect(APhostname.c_str(), MQTTuser.c_str(), MQTTpassword.c_str());
+    } else {
+        MQTTclient.connect(APhostname.c_str());
+    }
+
+    // Keepalive every 15s
+    MQTTclient.setKeepAlive(15);
+
+    if (MQTTclient.connected()) {
+        // Set up global subscribe callback
+        MQTTclient.onMessage(mqtt_receive_callback);
+
+        // Set up subscriptions
+        MQTTclient.subscribe(String(MQTTprefix + "/Set/#"));
+    }
+
+    MQTTconfigured = true;
+
+    //publish MQTT discovery topics
+    //we need something to make all this JSON stuff readable, without doing all this assign and serialize stuff
+#define jsn(x, y) String(R"(")") + x + R"(" : ")" + y + R"(")"
+    //jsn(device_class, current) expands to:
+    // R"("device_class" : "current")"
+
+#define jsna(x, y) String(R"(, )") + jsn(x, y)
+    //json add expansion, same as above but now with a comma prepended
+
+    //first all device stuff:
+    const String device_payload = String(R"("device": {)") + jsn("model","SmartEVSE v3") + jsna("identifiers", MQTTprefix) + jsna("name", MQTTprefix) +jsna("manufacturer","Stegen")+ "}";
+    //so entity can be sensor, switch, select etc.
+    //a device SmartEVSE-1001 consists of multiple entities
+    String entity_suffix, entity_name, optional_payload;
+
+    //some self-updating variables here:
+#define entity_id MQTTprefix + "-" + entity_suffix
+#define entity_path MQTTprefix + "/" + entity_suffix
+#define entity_name(x) entity_name = x; entity_suffix = entity_name; entity_suffix.replace(" ", "");
+#define announce(x) entity_name(x); MQTTclient.publish("homeassistant/sensor/" + entity_id + "/config",  "{" + jsn("name", entity_name) + jsna("state_topic", entity_path) + jsna("object_id", entity_id) + jsna("unique_id", entity_id) + "," + device_payload + optional_payload + "}", true, 0);
+
+    //now set the parameters for the next batch of entities:
+    optional_payload = jsna("device_class","current") + jsna("unit_of_measurement","A") + jsna("val_tpl", R"({{ value | int / 10 }})");
+
+    //now the sensor/switch/select = entity stuff:
+    announce("Charge Current");
+    announce("Charge Current Override");
+    announce("Max Current");
+    announce("EV Charge Current");
+    if (MainsMeter) {
+        announce("Mains Current L1");
+        announce("Mains Current L2");
+        announce("Mains Current L3");
+    };
+    if (EVMeter) {
+        announce("EV Current L1");
+        announce("EV Current L2");
+        announce("EV Current L3");
+    };
+    if (PVMeter) {
+        announce("PV Current L1");
+        announce("PV Current L2");
+        announce("PV Current L3");
+    };
+    if (homeBatteryLastUpdate) {
+        announce("Home Battery Current");
+    };
+
+    if (Modem) {
+        //now set the parameters for the next batch of entities:
+        optional_payload = jsna("unit_of_measurement","%") + jsna("val_tpl", R"({% if value | int > -1 %} {{ value | int / 10 }} {% endif %})");
+        announce("EV Initial SoC");
+        announce("EV Full SoC");
+        announce("EV Computed SoC");
+    };
+
+    //now set the parameters for the next batch of entities:
+    optional_payload = "";
+    announce("EV Plug State");
+    announce("Mode");
+    announce("Access");
+    announce("Error");
+    announce("State");
+    announce("RFID");
+
+    //now set the parameters for the next batch of entities:
+    optional_payload = jsna("device_class","temperature") + jsna("unit_of_measurement","°C");
+    //optional_payload = jsna("unit_of_measurement","°C");
+    announce("ESP Temp");
+
+    optional_payload = jsna("device_class","power") + jsna("unit_of_measurement","W");
+    announce("EV Charge Power");
+    optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh");
+    announce("EV Energy Charged");
+    if (Modem) {
+        optional_payload = jsna("unit_of_measurement","%") + jsna("val_tpl", R"({{ (value | int / 1024 * 100) | round(0) }})");
+        announce("CP PWM");
+        optional_payload = jsna("device_class","current") + jsna("unit_of_measurement","A") + jsna("val_tpl", R"({% if value | int > -1 %} {{ (value | int / 1024 * 100) | round(0) }} {% else %} N/A {% endif %})");
+        announce("CP PWM Override");
+    };
+}
+
+void mqttPublishData() {
+    lastMqttUpdate = 0;
+
+    if (MQTTclient.connected()) {
+        MQTTclient.publish(MQTTprefix + "/ESPUptime", String((esp_timer_get_time() / 1000000)), false, 0);
+        MQTTclient.publish(MQTTprefix + "/ESPTemp", String(TempEVSE), false, 0);
+        MQTTclient.publish(MQTTprefix + "/Mode", Access_bit == 0 ? "OFF" : Mode > 3 ? "N/A" : StrMode[Mode], true, 0);
+        MQTTclient.publish(MQTTprefix + "/MaxCurrent", String(MaxCurrent * 10), true, 0);
+        MQTTclient.publish(MQTTprefix + "/ChargeCurrent", String(ChargeCurrent), true, 0);
+        MQTTclient.publish(MQTTprefix + "/ChargeCurrentOverride", String(OverrideCurrent), true, 0);
+        MQTTclient.publish(MQTTprefix + "/Access", String(StrAccessBit[Access_bit]), true, 0);
+        MQTTclient.publish(MQTTprefix + "/RFID", !RFIDReader ? "Not Installed" : RFIDstatus >= 8 ? "NOSTATUS" : StrRFIDStatusWeb[RFIDstatus], true, 0);
+        MQTTclient.publish(MQTTprefix + "/State", getStateNameWeb(State), true, 0);
+        MQTTclient.publish(MQTTprefix + "/Error", getErrorNameWeb(ErrorFlags), true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVPlugState", (pilot != PILOT_12V) ? "Connected" : "Disconnected", true, 0);
+        MQTTclient.publish(MQTTprefix + "/EVChargePower", String(PowerMeasured), false, 0);
+        MQTTclient.publish(MQTTprefix + "/EVChargeCurrent", String(ChargeCurrent), false, 0);
+        MQTTclient.publish(MQTTprefix + "/EVEnergyCharged", String(EnergyCharged), true, 0);
+        if (Modem) {
+            MQTTclient.publish(MQTTprefix + "/CPPWM", String(CurrentPWM), false, 0);
+            MQTTclient.publish(MQTTprefix + "/CPPWMOverride", String(CPDutyOverride ? String(CurrentPWM) : "-1"), true, 0);
+            MQTTclient.publish(MQTTprefix + "/EVInitialSoC", String(InitialSoC), true, 0);
+            MQTTclient.publish(MQTTprefix + "/EVFullSoC", String(FullSoC), true, 0);
+            MQTTclient.publish(MQTTprefix + "/EVComputedSoC", String(ComputedSoC), true, 0);
+        };
+        if (EVMeter) {
+            MQTTclient.publish(MQTTprefix + "/EVCurrentL1", String(Irms_EV[0]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/EVCurrentL2", String(Irms_EV[1]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/EVCurrentL3", String(Irms_EV[2]), false, 0);
+        };
+        if (PVMeter) {
+            MQTTclient.publish(MQTTprefix + "/PVCurrentL1", String(PV[0] > 100 ? (uint) PV[0] / 100 : 0), false, 0);
+            MQTTclient.publish(MQTTprefix + "/PVCurrentL2", String(PV[1] > 100 ? (uint) PV[1] / 100 : 0), false, 0);
+            MQTTclient.publish(MQTTprefix + "/PVCurrentL3", String(PV[2] > 100 ? (uint) PV[2] / 100 : 0), false, 0);
+        };
+        if (MainsMeter) {
+            MQTTclient.publish(MQTTprefix + "/MainsCurrentL1", String(Irms[0]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/MainsCurrentL2", String(Irms[1]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/MainsCurrentL3", String(Irms[2]), false, 0);
+        };
+        if (homeBatteryLastUpdate)
+            MQTTclient.publish(MQTTprefix + "/HomeBatteryCurrent", String(homeBatteryCurrent), false, 0);
+    } else {
+        if (WiFi.status() == WL_CONNECTED) {
+            // Setup MQTT client again so we can reconnect
+            SetupMQTTClient();
+        }
+    }
+}
+#endif
 
 // task 1000msTimer
 void Timer1S(void * parameter) {
@@ -2135,7 +2503,7 @@ void Timer1S(void * parameter) {
 
         // activation Mode is active
         if (ActivationTimer) ActivationTimer--;                             // Decrease ActivationTimer every second.
-        
+#ifdef MODEM
         if (State == STATE_MODEM_REQUEST){
             if (ToModemWaitStateTimer) ToModemWaitStateTimer--;
             else{
@@ -2160,18 +2528,41 @@ void Timer1S(void * parameter) {
                 //  - Negotiation fails between pyPLC and car. Some cars then won't accept charge via AC it seems after, so we just "re-plug" and start charging without the modem communication protocol 
                 //  - State STATE_B will enable CP pin again, if disabled. 
                 // This stage we are now in is just before we enable CP_PIN and resume via STATE_B
-                
-                // So set the correct PWM cycles, as it still might be set to 5% or something.
-                BalancedMax[0] = MaxCapacity * 10;
-                Balanced[0] = ChargeCurrent;                                // Set pilot duty cycle to ChargeCurrent (v2.15)
 
-                setState(STATE_B);                                         // switch to STATE_ACTSTART
+                // Check whether the EVCCID matches the one required
+                if (strcmp(RequiredEVCCID, "") == 0 || strcmp(RequiredEVCCID, EVCCID) == 0) {
+                    // We satisfied the EVCCID requirements, skip modem stages next time
+                    ModemStage = 1;
+
+                    setState(STATE_B);                                     // switch to STATE_ACTSTART
+                    GLCD();                                                // Re-init LCD (200ms delay)
+                } else {
+                    // We actually do not want to continue charging and re-start at modem request after 60s
+                    ModemStage = 0;
+                    LeaveModemDeniedStateTimer = 60;
+
+                    // Reset CP & turn off
+                    SetCPDuty(1024);
+                    CP_OFF;
+
+                    // Change to MODEM_DENIED state
+                    setState(STATE_MODEM_DENIED);
+                    GLCD();                                                // Re-init LCD (200ms delay)
+                }
+            }
+        }
+
+        if (State == STATE_MODEM_DENIED){
+            if (LeaveModemDeniedStateTimer) LeaveModemDeniedStateTimer--;
+            else{
+                LeaveModemDeniedStateTimer = -1;           // reset ModemStateDeniedTimer
+                CP_ON;
+                setState(STATE_A);                         // switch to STATE_MODEM_REQUEST
                 GLCD();                                                // Re-init LCD (200ms delay)
             }
         }
 
-
-
+#endif
         if (State == STATE_C1) {
             if (C1Timer) C1Timer--;                                         // if the EV does not stop charging in 6 seconds, we will open the contactor.
             else {
@@ -2181,7 +2572,7 @@ void Timer1S(void * parameter) {
             }
         }
 
-
+#ifdef MODEM
         // Normally, the modem is enabled when Modem == Experiment. However, after a succesfull communication has been set up, EVSE will restart communication by replugging car and moving back to state B.
         // This time, communication is not initiated. When a car is disconnected, we want to enable the modem states again, but using 12V signal is not reliable (we just "replugged" via CP pin, remember).
         // This counter just enables the state after 60 seconds of success. 
@@ -2193,13 +2584,13 @@ void Timer1S(void * parameter) {
         if (DisconnectTimeCounter > 60){
             pilot = Pilot();
             if (pilot == PILOT_12V && Access_bit != 0){
-                DisconnectTimeCounter = -1; 
+                DisconnectTimeCounter = -1;
                 DisconnectEvent();
             } else{ // Run again
                 DisconnectTimeCounter = 0; 
             }
         }
-
+#endif
 
         // once a second, measure temperature
         // range -40 .. +125C
@@ -2387,6 +2778,17 @@ void Timer1S(void * parameter) {
             } //if Det... = 0
         } //if Detecting_Charging_Phases_Timer
 
+#ifdef MQTT
+        // Process MQTT data
+        MQTTclient.loop();
+
+        if (MQTTconfigured && lastMqttUpdate++ >= 10) {
+            // Publish latest data, every 10 seconds
+            // We will try to publish data faster if something has changed
+            mqttPublishData();
+        }
+#endif
+
         // Pause the task for 1 Sec
         vTaskDelay(1000 / portTICK_PERIOD_MS);
 
@@ -2488,7 +2890,8 @@ ModbusMessage MBEVMeterResponse(ModbusMessage request) {
             EnergyEV = EV_import_active_energy - EV_export_active_energy;
             if (ResetKwh == 2) EnergyMeterStart = EnergyEV;                 // At powerup, set EnergyEV to kwh meter value
             EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
-            RecomputeSoC();
+            if (Modem)
+                RecomputeSoC();
         } else if (MB.Register == EMConfig[EVMeter].PRegister) {
             // Power measurement
             PowerMeasured = receivePowerMeasurement(MB.Data, EVMeter);
@@ -2813,8 +3216,8 @@ void ConfigureModbusMode(uint8_t newmode) {
                 MBbridge.attachServer(EVMeterAddress, EVMeterAddress, ANY_FUNCTION_CODE, &MBclient);
             if (PVMeter)
                 MBbridge.attachServer(PVMeterAddress, PVMeterAddress, ANY_FUNCTION_CODE, &MBclient);
-            // Port number 502, maximum of 3 clients in parallel, 10 seconds timeout
-            MBbridge.start(502, 3, 10000);
+            // Port number 502, maximum of 5 clients in parallel, 10 seconds timeout
+            MBbridge.start(502, 5, 10000);
 
         } 
     } else if (newmode > 1) {
@@ -2941,12 +3344,22 @@ void read_settings(bool write) {
         EMConfig[EM_CUSTOM].Function = preferences.getUChar("EMFunction",EMCUSTOM_FUNCTION);
         WIFImode = preferences.getUChar("WIFImode",WIFI_MODE);
         APpassword = preferences.getString("APpassword",AP_PASSWORD);
-        DelayedStartTime.epoch2 = preferences.getULong("DelayedStartTime", DELAYEDSTARTTIME); //epoch2 is 4 bytes long on arduino
+        DelayedStartTime.epoch2 = preferences.getULong("DelayedStartTim", DELAYEDSTARTTIME); //epoch2 is 4 bytes long on arduino; NVS key has reached max size
         DelayedStopTime.epoch2 = preferences.getULong("DelayedStopTime", DELAYEDSTOPTIME);    //epoch2 is 4 bytes long on arduino
+        TZname = preferences.getString("Timezone","Europe/Berlin");
 
         EnableC2 = (EnableC2_t) preferences.getUShort("EnableC2", ENABLE_C2);
-        Modem = (Modem_t) preferences.getUShort("Modem", MODEM);
+        Modem = (Modem_t) preferences.getUShort("Modem", NOTPRESENT);
+        strncpy(RequiredEVCCID, preferences.getString("RequiredEVCCID", "").c_str(), sizeof(RequiredEVCCID));
         maxTemp = preferences.getUShort("maxTemp", MAX_TEMPERATURE);
+
+#ifdef MQTT
+        MQTTpassword = preferences.getString("MQTTpassword");
+        MQTTuser = preferences.getString("MQTTuser");
+        MQTTprefix = preferences.getString("MQTTprefix", APhostname);
+        MQTTHost = preferences.getString("MQTTHost", "");
+        MQTTPort = preferences.getUShort("MQTTPort", 1883);
+#endif
 
         preferences.end();                                  
 
@@ -2998,12 +3411,21 @@ void write_settings(void) {
     preferences.putUChar("EMFunction", EMConfig[EM_CUSTOM].Function);
     preferences.putUChar("WIFImode", WIFImode);
     preferences.putString("APpassword", APpassword);
-    preferences.putULong("DelayedStartTime", DelayedStartTime.epoch2); //epoch2 only needs 4 bytes
+    preferences.putULong("DelayedStartTim", DelayedStartTime.epoch2); //epoch2 only needs 4 bytes; NVS key has reached max size
     preferences.putULong("DelayedStopTime", DelayedStopTime.epoch2);   //epoch2 only needs 4 bytes
 
     preferences.putUShort("EnableC2", EnableC2);
     preferences.putUShort("Modem", Modem);
+    preferences.putString("RequiredEVCCID", String(RequiredEVCCID));
     preferences.putUShort("maxTemp", maxTemp);
+
+#ifdef MQTT
+    preferences.putString("MQTTpassword", MQTTpassword);
+    preferences.putString("MQTTuser", MQTTuser);
+    preferences.putString("MQTTprefix", MQTTprefix);
+    preferences.putString("MQTTHost", MQTTHost);
+    preferences.putUShort("MQTTPort", MQTTPort);
+#endif
 
     preferences.end();
 
@@ -3183,7 +3605,7 @@ void StartwebServer(void) {
 
         boolean evConnected = pilot != PILOT_12V;                    //when access bit = 1, p.ex. in OFF mode, the STATEs are no longer updated
 
-        DynamicJsonDocument doc(1400); // https://arduinojson.org/v6/assistant/
+        DynamicJsonDocument doc(1500); // https://arduinojson.org/v6/assistant/
         doc["version"] = String(VERSION);
         doc["mode"] = mode;
         doc["mode_id"] = modeId;
@@ -3221,21 +3643,7 @@ void StartwebServer(void) {
         doc["evse"]["state_id"] = State;
         doc["evse"]["error"] = error;
         doc["evse"]["error_id"] = errorId;
-
-        if (RFIDReader) {
-            switch(RFIDstatus) {
-                case 0: doc["evse"]["rfid"] = "Ready to read card"; break;
-                case 1: doc["evse"]["rfid"] = "Present"; break;
-                case 2: doc["evse"]["rfid"] = "Card Stored"; break;
-                case 3: doc["evse"]["rfid"] = "Card Deleted"; break;
-                case 4: doc["evse"]["rfid"] = "Card already stored"; break;
-                case 5: doc["evse"]["rfid"] = "Card not in storage"; break;
-                case 6: doc["evse"]["rfid"] = "Card Storage full"; break;
-                case 7: doc["evse"]["rfid"] = "Invalid"; break;
-            }
-         } else {
-             doc["evse"]["rfid"] = "Not Installed";
-         }
+        doc["evse"]["rfid"] = !RFIDReader ? "Not Installed" : RFIDstatus >= 8 ? "NOSTATUS" : StrRFIDStatusWeb[RFIDstatus];
 
         doc["settings"]["charge_current"] = Balanced[0];
         doc["settings"]["override_current"] = OverrideCurrent;
@@ -3251,11 +3659,34 @@ void StartwebServer(void) {
         doc["settings"]["starttime"] = (DelayedStartTime.epoch2 ? DelayedStartTime.epoch2 + EPOCH2_OFFSET : 0);
         doc["settings"]["stoptime"] = (DelayedStopTime.epoch2 ? DelayedStopTime.epoch2 + EPOCH2_OFFSET : 0);
         doc["settings"]["repeat"] = DelayedRepeat;
-        
-        doc["car_modem"]["ev_initial_soc"] = InitialSoC;
-        doc["car_modem"]["ev_full_soc"] = FullSoC;
-        doc["car_modem"]["ev_bulk_soc"] = BulkSoC;
-        doc["car_modem"]["computed_soc"] = ComputedSoC; 
+        if (Modem) {
+            doc["settings"]["required_evccid"] = RequiredEVCCID;
+            doc["ev_state"]["initial_soc"] = InitialSoC;
+            doc["ev_state"]["remaining_soc"] = RemainingSoC;
+            doc["ev_state"]["full_soc"] = FullSoC;
+            doc["ev_state"]["energy_capacity"] = EnergyCapacity > 0 ? round(EnergyCapacity / 100)/10 : -1; //in kWh, precision 1 decimal;
+            doc["ev_state"]["energy_request"] = EnergyRequest > 0 ? round(EnergyRequest / 100)/10 : -1; //in kWh, precision 1 decimal
+            doc["ev_state"]["computed_soc"] = ComputedSoC;
+            doc["ev_state"]["evccid"] = EVCCID;
+        }
+
+#ifdef MQTT
+        doc["mqtt"]["host"] = MQTTHost;
+        doc["mqtt"]["port"] = MQTTPort;
+        doc["mqtt"]["topic_prefix"] = MQTTprefix;
+        doc["mqtt"]["username"] = MQTTuser;
+        doc["mqtt"]["password_set"] = MQTTpassword != "";
+
+        if (MQTTconfigured) {
+            if (MQTTclient.connected()) {
+                doc["mqtt"]["status"] = "Connected";
+            } else {
+                doc["mqtt"]["status"] = "Disconnected";
+            }
+        } else {
+            doc["mqtt"]["status"] = "Unconfigured";
+        }
+#endif
 
         doc["home_battery"]["current"] = homeBatteryCurrent;
         doc["home_battery"]["last_update"] = homeBatteryLastUpdate;
@@ -3280,9 +3711,9 @@ void StartwebServer(void) {
         doc["phase_currents"]["L2"] = Irms[1];
         doc["phase_currents"]["L3"] = Irms[2];
         doc["phase_currents"]["last_data_update"] = phasesLastUpdate;
-        doc["phase_currents"]["charging_L1"] = Charging_Phase[0];
-        doc["phase_currents"]["charging_L2"] = Charging_Phase[1];
-        doc["phase_currents"]["charging_L3"] = Charging_Phase[2];
+        doc["phase_currents"]["charging_L1"] = (evstate == "Charging" ? Charging_Phase[0] : false);
+        doc["phase_currents"]["charging_L2"] = (evstate == "Charging" ? Charging_Phase[1] : false);
+        doc["phase_currents"]["charging_L3"] = (evstate == "Charging" ? Charging_Phase[2] : false);
         doc["phase_currents"]["original_data"]["TOTAL"] = IrmsOriginal[0] + IrmsOriginal[1] + IrmsOriginal[2];
         doc["phase_currents"]["original_data"]["L1"] = IrmsOriginal[0];
         doc["phase_currents"]["original_data"]["L2"] = IrmsOriginal[1];
@@ -3383,33 +3814,20 @@ void StartwebServer(void) {
                     ToModemWaitStateTimer = 0;
                     ToModemDoneStateTimer = 0;
                     LeaveModemDoneStateTimer = 0;
+                    LeaveModemDeniedStateTimer = 0;
                     setAccess(0);
                     break;
                 case 1:
-                    setAccess(!DelayedStartTime.epoch2);              //if DelayedStartTime not zero then we are Delayed Charging
                     setMode(MODE_NORMAL);
                     break;
                 case 2:
-                    if (MainsMeter) {
-                        OverrideCurrent = 0;
-                        setAccess(!DelayedStartTime.epoch2);
-                        setMode(MODE_SOLAR);
-                        break;
-                    }
+                    setMode(MODE_SOLAR);
+                    break;
                 case 3:
-                    if (MainsMeter) {
-                        setAccess(!DelayedStartTime.epoch2);
-                        setMode(MODE_SMART);
-                        break;
-                    }
+                    setMode(MODE_SMART);
+                    break;
                 default:
                     mode = "Value not allowed!";
-            }
-            if (preferences.begin("settings", false) ) {                        //false = write mode
-                preferences.putUChar("Mode", Mode);
-                preferences.putULong("DelayedStartTime", DelayedStartTime.epoch2); //epoch2 only needs 4 bytes
-                preferences.putULong("DelayedStopTime", DelayedStopTime.epoch2);   //epoch2 only needs 4 bytes
-                preferences.end();
             }
             doc["mode"] = mode;
         }
@@ -3471,6 +3889,82 @@ void StartwebServer(void) {
                 doc["solar_max_import"] = "Value not allowed!";
             }
         }
+
+        //special section to post stuff for experimenting with an ISO15118 modem
+        if(request->hasParam("override_pwm")) {
+            int pwm = request->getParam("override_pwm")->value().toInt();
+            if (pwm == 0){
+                CP_OFF;
+                CPDutyOverride = true;
+            } else if (pwm < 0){
+                CP_ON;
+                CPDutyOverride = false;
+                pwm = 100; // 10% until next loop, to be safe, corresponds to 6A
+            } else{
+                CP_ON;
+                CPDutyOverride = true;
+            }
+
+            SetCPDuty(pwm);
+            doc["override_pwm"] = pwm;
+        }
+
+        //allow basic plug 'n charge based on evccid
+        //if required_evccid is set to a value, SmartEVSE will only allow charging requests from said EVCCID
+        if(request->hasParam("required_evccid")) {
+            if (request->getParam("required_evccid")->value().length() <= 32) {
+                strncpy(RequiredEVCCID, request->getParam("required_evccid")->value().c_str(), sizeof(RequiredEVCCID));
+                doc["required_evccid"] = RequiredEVCCID;
+                write_settings();
+            } else {
+                doc["required_evccid"] = "EVCCID too long (max 32 char)";
+            }
+        }
+
+#ifdef MQTT
+        if(request->hasParam("mqtt_update")) {
+            if (request->getParam("mqtt_update")->value().toInt() == 1) {
+
+                if(request->hasParam("mqtt_host")) {
+                    MQTTHost = request->getParam("mqtt_host")->value();
+                    doc["mqtt_host"] = MQTTHost;
+                }
+
+                if(request->hasParam("mqtt_port")) {
+                    MQTTPort = request->getParam("mqtt_port")->value().toInt();
+                    if (MQTTPort == 0) MQTTPort = 1883;
+                    doc["mqtt_port"] = MQTTPort;
+                }
+
+                if(request->hasParam("mqtt_topic_prefix")) {
+                    MQTTprefix = request->getParam("mqtt_topic_prefix")->value();
+                    if (!MQTTprefix || MQTTprefix == "") {
+                        MQTTprefix = APhostname;
+                    }
+                    doc["mqtt_topic_prefix"] = MQTTprefix;
+                }
+
+                if(request->hasParam("mqtt_username")) {
+                    MQTTuser = request->getParam("mqtt_username")->value();
+                    if (!MQTTuser || MQTTuser == "") {
+                        MQTTuser.clear();
+                    }
+                    doc["mqtt_username"] = MQTTuser;
+                }
+
+                if(request->hasParam("mqtt_password")) {
+                    MQTTpassword = request->getParam("mqtt_password")->value();
+                    if (!MQTTpassword || MQTTpassword == "") {
+                        MQTTpassword.clear();
+                    }
+                    doc["mqtt_password_set"] = (MQTTpassword != "");
+                }
+
+                SetupMQTTClient();
+                write_settings();
+            }
+        }
+#endif
 
         String json;
         serializeJson(doc, json);
@@ -3545,7 +4039,8 @@ void StartwebServer(void) {
                 EnergyEV = EV_import_active_energy - EV_export_active_energy;
                 if (ResetKwh == 2) EnergyMeterStart = EnergyEV;                 // At powerup, set EnergyEV to kwh meter value
                 EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
-                RecomputeSoC();
+                if (Modem)
+                    RecomputeSoC();
             }
         }
 
@@ -3569,64 +4064,83 @@ void StartwebServer(void) {
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
     });
 
-    webServer.on("/modem", HTTP_POST, [](AsyncWebServerRequest *request) {
+    webServer.on("/ev_state", HTTP_POST, [](AsyncWebServerRequest *request) {
         DynamicJsonDocument doc(200);
 
-        //special section to post stuff for experimenting with an ISO15118 modem
-        if(request->hasParam("pwm")) {
-            int pwm = request->getParam("pwm")->value().toInt();
-            if (pwm == 0){
-                CP_OFF;
-                CPDutyOverride = true;
-            } else if (pwm < 0){
-                CP_ON;
-                CPDutyOverride = false;
-                pwm = 100; // 10% until next loop, to be safe, corresponds to 6A
-            }else{
-                CP_ON;
-                CPDutyOverride = true;
-            }
-            SetCPDuty(pwm);
-            doc["pwm"] = pwm;
-
-            String json;
-            serializeJson(doc, json);
-            request->send(200, "application/json", json);
-
-        }
-
         //State of charge posting
-        if(request->hasParam("remaining_soc")) {
-            int remaining_soc = request->getParam("remaining_soc")->value().toInt();
-            int full_soc = request->getParam("full_soc")->value().toInt();
-            int bulk_soc = request->getParam("bulk_soc")->value().toInt();
+        int current_soc = request->getParam("current_soc")->value().toInt();
+        int full_soc = request->getParam("full_soc")->value().toInt();
 
-            InitialSoC = remaining_soc;
+        // Energy requested by car
+        int energy_request = request->getParam("energy_request")->value().toInt();
 
-            if (full_soc >= FullSoC) // Only update if we received it, since sometimes it's there, sometimes it's not
-                FullSoC = full_soc;
-            if (bulk_soc >= BulkSoC) // Only update if we received it, since sometimes it's there, sometimes it's not
-                BulkSoC = bulk_soc;
+        // Total energy capacity of car's battery
+        int energy_capacity = request->getParam("energy_capacity")->value().toInt();
 
-            if (remaining_soc >= 0 && remaining_soc <= 100){
-                // Skip waiting, charge since we have what we've got
-                if (State == STATE_MODEM_REQUEST || State == STATE_MODEM_WAIT || State == STATE_MODEM_DONE){
-                    _LOG_A("Received SoC via REST. Shortcut to State Modem Done\n");
-                    ModemStage = 1;
-                    setState(STATE_MODEM_DONE); // Go to State B, which means in this case setting PWM
-                }
+        // Update EVCCID of car
+        if (request->hasParam("evccid")) {
+            if (request->getParam("evccid")->value().length() <= 32) {
+                strncpy(EVCCID, request->getParam("evccid")->value().c_str(), sizeof(EVCCID));
+                doc["evccid"] = EVCCID;
             }
+        }
 
-            doc["ev_remaining_soc"] = remaining_soc;
-            doc["ev_full_soc"] = full_soc;
-            doc["ev_bulk_soc"] = bulk_soc;
+        if (full_soc >= FullSoC) // Only update if we received it, since sometimes it's there, sometimes it's not
+            FullSoC = full_soc;
 
+        if (energy_capacity >= EnergyCapacity) // Only update if we received it, since sometimes it's there, sometimes it's not
+            EnergyCapacity = energy_capacity;
+
+        if (energy_request >= EnergyRequest) // Only update if we received it, since sometimes it's there, sometimes it's not
+            EnergyRequest = energy_request;
+
+        if (current_soc >= 0 && current_soc <= 100) {
+            // We set the InitialSoC for our own calculations
+            InitialSoC = current_soc;
+
+            // We also set the ComputedSoC to allow for app integrations
+            ComputedSoC = current_soc;
+
+            // Skip waiting, charge since we have what we've got
+            if (State == STATE_MODEM_REQUEST || State == STATE_MODEM_WAIT || State == STATE_MODEM_DONE){
+                _LOG_A("Received SoC via REST. Shortcut to State Modem Done\n");
+                setState(STATE_MODEM_DONE); // Go to State B, which means in this case setting PWM
+            }
+        }
+
+        RecomputeSoC();
+
+        doc["current_soc"] = current_soc;
+        doc["full_soc"] = full_soc;
+        doc["energy_capacity"] = energy_capacity;
+        doc["energy_request"] = energy_request;
+
+        String json;
+        serializeJson(doc, json);
+        request->send(200, "application/json", json);
+    },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
+    });
+
+    webServer.on("/modbus", HTTP_POST, [](AsyncWebServerRequest *request) {
+        DynamicJsonDocument doc(200);
+
+        //to bridge meter address (decimal)
+        //activate tcp Modbus bridge, example:
+        //curl -X POST http://smartevse-xxxxx.lan/modbus?bridge_meter_address=101
+        //max 5 meters allowed, of which mainsmeter, evmeter and pvmeter might already be taken
+        //TODO not sure what happens if you exceed this maximum, since attachServer always returns true....
+        //has to be activated after every reboot
+        if(request->hasParam("bridge_meter_address")) {
+            int address = request->getParam("bridge_meter_address")->value().toInt();
+            doc["bridge_meter_address"] = "Value not allowed";                  //will be overwritten when success bridging
+            if ( address >= 10 && address <= 249) {
+                MBbridge.attachServer(MainsMeterAddress, MainsMeterAddress, ANY_FUNCTION_CODE, &MBclient);
+                doc["bridge_meter_address"] = address;
+            }
             String json;
             serializeJson(doc, json);
             request->send(200, "application/json", json);
-
         }
-
     });
 
 #ifdef FAKE_RFID
@@ -3677,10 +4191,8 @@ void onWifiEvent(WiFiEvent_t event) {
 void WiFiSetup(void) {
 
     //ESPAsync_wifiManager.resetSettings();   //reset saved settings
-
-    ESPAsync_wifiManager.setDebugOutput(true);
+    //ESPAsync_wifiManager.setDebugOutput(true);
     ESPAsync_wifiManager.setMinimumSignalQuality(-1);
-    // Set config portal channel, default = 1. Use 0 => random channel from 1-13
 
     // Start the mDNS responder so that the SmartEVSE can be accessed using a local hostame: http://SmartEVSE-xxxxxx.local
     if (!MDNS.begin(APhostname.c_str())) {                
@@ -3695,9 +4207,12 @@ void WiFiSetup(void) {
     WiFi.onEvent(onWifiEvent);
 
     // Init and get the time
-    // See https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv for Timezone codes for your region
-    configTzTime(TZ_INFO, NTP_SERVER);
-    
+    sntp_servermode_dhcp(1);                                                    //try to get the ntp server from dhcp
+    sntp_setservername(1, "europe.pool.ntp.org");                               //fallback server
+    sntp_init();
+    String TZ_INFO = ESPAsync_wifiManager.getTZ(TZname.c_str());
+    setenv("TZ",TZ_INFO.c_str(),1);
+    tzset();
     //if(!getLocalTime(&timeinfo)) _LOG_A("Failed to obtain time\n");
     
     // test code, sets time to 31-OCT, 02:59:50 , 10 seconds before DST will be switched off
@@ -3720,6 +4235,7 @@ void SetupPortalTask(void * parameter) {
     _LOG_A("Start Portal...\n");
     StopwebServer();
     WiFi.disconnect(true);
+    // Set config portal channel, default = 1. Use 0 => random channel from 1-13
     ESPAsync_wifiManager.setConfigPortalChannel(0);
     ESPAsync_wifiManager.setAPStaticIPConfig(IPAddress(192,168,4,1), IPAddress(192,168,4,1), IPAddress(255,255,255,0));
 
@@ -3728,6 +4244,14 @@ void SetupPortalTask(void * parameter) {
     ESPAsync_wifiManager.startConfigPortal(APhostname.c_str(), APpassword.c_str());         // blocking until connected or timeout.
     //_LOG_A("SetupPortalTask free ram: %u\n", uxTaskGetStackHighWaterMark( NULL ));
     WiFi.disconnect(true);
+
+    // this function only works in portal mode, so we have to save the timezone:
+    TZname = ESPAsync_wifiManager.getTimezoneName();
+    if (preferences.begin("settings", false) ) {
+        preferences.putString("Timezone",TZname);
+        preferences.end();
+    }
+
     WIFImode = 1;
     handleWIFImode();
     write_settings();
@@ -3975,7 +4499,13 @@ void setup() {
     GLCD_init();
 
     CP_ON;           // CP signal ACTIVE
-          
+
+#ifdef MQTT
+    // Setup MQTT client
+    MQTTclient.begin(client);
+    SetupMQTTClient();
+#endif
+
 }
 
 void loop() {

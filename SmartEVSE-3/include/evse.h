@@ -49,6 +49,15 @@
 #endif
 #endif
 
+#ifndef MQTT
+#define MQTT 1  // Uncomment or set to 0 to disable MQTT support in code
+#endif
+
+#ifndef MODEM
+//the wifi-debugger is available by telnetting to your SmartEVSE device
+#define MODEM 0  //0 = no modem 1 = modem
+#endif
+
 #ifndef VERSION
 //please note that this version will only be displayed with the correct time/date if the program is recompiled
 //so the webserver will show correct version if evse.cpp is recompiled
@@ -73,7 +82,6 @@
 #include "RemoteDebug.h"  //https://github.com/JoaoLopesF/RemoteDebug
 extern RemoteDebug Debug;
 #endif
-
 
 #define PHASE_DETECTION_TIME 22                                                 // especially Tesla seems to need up to 20 seconds to have all its phases activated
 
@@ -164,7 +172,6 @@ extern RemoteDebug Debug;
 #define WIFI_MODE 0
 #define AP_PASSWORD "00000000"
 #define ENABLE_C2 NOT_PRESENT
-#define MODEM NOTPRESENT
 #define MAX_TEMPERATURE 65
 #define DELAYEDSTARTTIME 0                                                             // The default StartTime for delayed charged, 0 = not delaying
 #define DELAYEDSTOPTIME 0                                                       // The default StopTime for delayed charged, 0 = not stopping
@@ -195,6 +202,7 @@ extern RemoteDebug Debug;
 #define STATE_MODEM_REQUEST 11                                                          // L Vehicle connected / requesting ISO15118 communication, 0% duty
 #define STATE_MODEM_WAIT 12                                                          // M Vehicle connected / requesting ISO15118 communication, 5% duty
 #define STATE_MODEM_DONE 13                                                // Modem communication succesful, SoCs extracted. Here, re-plug vehicle
+#define STATE_MODEM_DENIED 14                                                // Modem access denied based on EVCCID, re-plug vehicle and try again
 
 #define NOSTATE 255
 
@@ -410,6 +418,7 @@ extern uint8_t CalActive;                                                       
 extern uint16_t Iuncal;
 extern uint16_t SolarStopTimer;
 extern int32_t EnergyCharged;
+extern int32_t EnergyCapacity;
 extern int32_t PowerMeasured;
 extern uint8_t RFIDstatus;
 extern bool LocalTimeSet;
@@ -477,7 +486,7 @@ const struct {
     {"WIFI",    "Connect to WiFi access point",                       0, 2, WIFI_MODE},
     {"CONTACT2","Contactor2 (C2) behaviour",                          0, sizeof(StrEnableC2) / sizeof(StrEnableC2[0])-1, ENABLE_C2},
     {"MAX TEMP","Maximum temperature for the EVSE module",            40, 75, MAX_TEMPERATURE},
-    {"MODEM",   "Is an ISO15118 modem installed (experimental)",      0, 1, MODEM},
+    {"MODEM",   "Is an ISO15118 modem installed (experimental)",      0, 1, NOTPRESENT},
 
     {"EXIT", "EXIT", 0, 0, 0}
 };
