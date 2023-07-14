@@ -2386,16 +2386,26 @@ void SetupMQTTClient() {
         announce("Mains Current L2", "sensor");
         announce("Mains Current L3", "sensor");
         announce("Mains Total", "sensor");
-        optional_payload = jsna("device_class","power") + jsna("unit_of_measurement","kWh");
+        optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","kWh");
         announce("Mains Import Active Energy", "sensor");
         announce("Mains Export Active Energy", "sensor");
     };
     if (EVMeter) {
-        announce("EV Current L1", "sensor");
-        announce("EV Current L2", "sensor");
-        announce("EV Current L3", "sensor");
+        optional_payload = jsna("device_class","current") + jsna("unit_of_measurement","A") + jsna("value_template", R"({{ value | int / 10 }})");
+        announce("EV Meter Current L1", "sensor");
+        announce("EV Meter Current L2", "sensor");
+        announce("EV Meter Current L3", "sensor");
+        announce("EV Meter Current Total", "sensor")
+        optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","kWh");
+        announce("EV Meter Total kWh", "sensor");
+        announce("EV Meter Charged kWh", "sensor");
+        announce("EV Meter Import Active Energy", "sensor");
+        announce("EV Meter Export Active Energy", "sensor");
+        optional_payload = jsna("device_class","power") + jsna("unit_of_measurement","kW");
+        announce("EV Meter Import Active Power", "sensor");
     };
     if (PVMeter) {
+        optional_payload = jsna("device_class","current") + jsna("unit_of_measurement","A") + jsna("value_template", R"({{ value | int / 10 }})");
         announce("PV Current L1", "sensor");
         announce("PV Current L2", "sensor");
         announce("PV Current L3", "sensor");
@@ -2480,9 +2490,15 @@ void mqttPublishData() {
             MQTTclient.publish(MQTTprefix + "/EVComputedSoC", String(ComputedSoC), true, 0);
         };
         if (EVMeter) {
-            MQTTclient.publish(MQTTprefix + "/EVCurrentL1", String(Irms_EV[0]), false, 0);
-            MQTTclient.publish(MQTTprefix + "/EVCurrentL2", String(Irms_EV[1]), false, 0);
-            MQTTclient.publish(MQTTprefix + "/EVCurrentL3", String(Irms_EV[2]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/EVMeterCurrentL1", String(Irms_EV[0]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/EVMeterCurrentL2", String(Irms_EV[1]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/EVMeterCurrentL3", String(Irms_EV[2]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/EVMeterCurrentTotal", String(Irms_EV[0] + Irms_EV[1] + Irms_EV[2]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/EVMeterImportActivePower", String(round(PowerMeasured / 100)/10), false, 0);           //in kW, precision 1 decimal
+            MQTTclient.publish(MQTTprefix + "/EVMeterTotalkWh", String(round(EnergyEV / 100)/10), false, 0);                         //in kWh, precision 1 decimal
+            MQTTclient.publish(MQTTprefix + "/EVMeterChargedkWh", String(round(EnergyCharged / 100)/10), false, 0);                  //in kWh, precision 1 decimal
+            MQTTclient.publish(MQTTprefix + "/EVMeterImportActiveEnergy", String(round(EV_import_active_energy / 100)/10), false, 0); //in kWh, precision 1 decimal
+            MQTTclient.publish(MQTTprefix + "/EVMeterExportActiveEnergy", String(round(EV_export_active_energy / 100)/10), false, 0); //in kWh, precision 1 decimal
         };
         if (PVMeter) {
             MQTTclient.publish(MQTTprefix + "/PVCurrentL1", String(PV[0] > 100 ? (uint) PV[0] / 100 : 0), false, 0);
