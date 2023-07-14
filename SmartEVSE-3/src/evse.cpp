@@ -2207,7 +2207,7 @@ uint8_t PollEVNode = NR_EVSES;
 #ifdef MQTT
 void mqtt_receive_callback(const String &topic, const String &payload) {
     if (topic == MQTTprefix + "/Set/Mode") {
-        if (payload == "OFF") {
+        if (payload == "Off") {
             ToModemWaitStateTimer = 0;
             ToModemDoneStateTimer = 0;
             LeaveModemDoneStateTimer = 0;
@@ -2434,7 +2434,7 @@ void SetupMQTTClient() {
 
     //set the parameters for and announce select entities, overriding automatic state_topic:
     optional_payload = jsna("state_topic", String(MQTTprefix + "/Mode")) + jsna("command_topic", String(MQTTprefix + "/Set/Mode"));
-    optional_payload += String(R"(, "options" : ["OFF", "Normal", "Smart", "Solar"])");
+    optional_payload += String(R"(, "options" : ["Off", "Normal", "Smart", "Solar"])");
     announce("Mode Selector", "select");
 
     //set the parameters for and announce number entities:
@@ -2449,7 +2449,7 @@ void mqttPublishData() {
     if (MQTTclient.connected()) {
         MQTTclient.publish(MQTTprefix + "/ESPUptime", String((esp_timer_get_time() / 1000000)), false, 0);
         MQTTclient.publish(MQTTprefix + "/ESPTemp", String(TempEVSE), false, 0);
-        MQTTclient.publish(MQTTprefix + "/Mode", Access_bit == 0 ? "OFF" : Mode > 3 ? "N/A" : StrMode[Mode], true, 0);
+        MQTTclient.publish(MQTTprefix + "/Mode", Access_bit == 0 ? "Off" : Mode > 3 ? "N/A" : StrMode[Mode], true, 0);
         MQTTclient.publish(MQTTprefix + "/MaxCurrent", String(MaxCurrent * 10), true, 0);
         MQTTclient.publish(MQTTprefix + "/ChargeCurrent", String(ChargeCurrent), true, 0);
         MQTTclient.publish(MQTTprefix + "/ChargeCurrentOverride", String(OverrideCurrent), true, 0);
