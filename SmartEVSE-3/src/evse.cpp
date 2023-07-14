@@ -2385,6 +2385,10 @@ void SetupMQTTClient() {
         announce("Mains Current L1", "sensor");
         announce("Mains Current L2", "sensor");
         announce("Mains Current L3", "sensor");
+        announce("Mains Total", "sensor");
+        optional_payload = jsna("device_class","power") + jsna("unit_of_measurement","kWh");
+        announce("Mains Import Active Energy", "sensor");
+        announce("Mains Export Active Energy", "sensor");
     };
     if (EVMeter) {
         announce("EV Current L1", "sensor");
@@ -2489,6 +2493,9 @@ void mqttPublishData() {
             MQTTclient.publish(MQTTprefix + "/MainsCurrentL1", String(Irms[0]), false, 0);
             MQTTclient.publish(MQTTprefix + "/MainsCurrentL2", String(Irms[1]), false, 0);
             MQTTclient.publish(MQTTprefix + "/MainsCurrentL3", String(Irms[2]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/MainsTotal", String(Irms[0] + Irms[1] + Irms[2]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/MainsImportActiveEnergy", String(round(Mains_import_active_energy / 100)/10), false, 0); //in kWh, precision 1 decimal
+            MQTTclient.publish(MQTTprefix + "/MainsExportActiveEnergy", String(round(Mains_export_active_energy / 100)/10), false, 0); //in kWh, precision 1 decimal
         };
         if (homeBatteryLastUpdate)
             MQTTclient.publish(MQTTprefix + "/HomeBatteryCurrent", String(homeBatteryCurrent), false, 0);
