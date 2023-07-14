@@ -615,15 +615,13 @@ void setMode(uint8_t NewMode) {
     // it's only the regulation algorithm that is changing...
     // EXCEPT when EnableC2 == Solar Off, because we would expect C2 to be off when in Solar Mode and EnableC2 == Solar Off
     // and also the other way around, multiple phases might be wanted when changing from Solar to Normal or Smart
+    bool switchOnLater = false;
     if (EnableC2 == SOLAR_OFF) {
         if ((Mode != MODE_SOLAR && NewMode == MODE_SOLAR) || (Mode == MODE_SOLAR && NewMode != MODE_SOLAR)) {
             //we are switching from non-solar to solar
             //since we EnableC2 == SOLAR_OFF C2 is turned On now, and should be turned off
             setAccess(0);                                                       //switch to OFF
-            if (LoadBl == 1) ModbusWriteSingleRequest(BROADCAST_ADR, 0x0003, NewMode);
-            Mode = NewMode;
-            setAccess(1);
-            return;
+            switchOnLater = true;
         }
     }
 
@@ -634,6 +632,16 @@ void setMode(uint8_t NewMode) {
 
     if (LoadBl == 1) ModbusWriteSingleRequest(BROADCAST_ADR, 0x0003, NewMode);
     Mode = NewMode;
+    if (switchOnLater)
+        setAccess(1);
+
+    //make mode and start/stoptimes persistent on reboot
+    if (preferences.begin("settings", false) ) {                        //false = write mode
+        preferences.putUChar("Mode", Mode);
+        preferences.putULong("DelayedStartTim", DelayedStartTime.epoch2); //epoch2 only needs 4 bytes
+        preferences.putULong("DelayedStopTime", DelayedStopTime.epoch2);   //epoch2 only needs 4 bytes
+        preferences.end();
+    }
 }
 /**
  * Set the solar stop timer
@@ -811,13 +819,14 @@ void setState(uint8_t NewState) {
 void setAccess(bool Access) {
     Access_bit = Access;
     if (Access == 0) {
-        if (Modem)
-            CP_OFF;
         if (State == STATE_C) setState(STATE_C1);                               // Determine where to switch to.
         else if (State == STATE_B || State == STATE_MODEM_REQUEST || State == STATE_MODEM_WAIT || State == STATE_MODEM_DONE || State == STATE_MODEM_DENIED) setState(STATE_B1);
-    } else{
-        if (Modem)
-            CP_ON;
+    }
+
+    //make mode and start/stoptimes persistent on reboot
+    if (preferences.begin("settings", false) ) {                        //false = write mode
+        preferences.putUChar("Access", Access_bit);
+        preferences.end();
     }
 
 #ifdef MQTT
@@ -2356,76 +2365,90 @@ void SetupMQTTClient() {
     //json add expansion, same as above but now with a comma prepended
 
     //first all device stuff:
-    const String device_payload = String(R"("device": {)") + jsn("model","SmartEVSE v3") + jsna("identifiers", MQTTprefix) + jsna("name", MQTTprefix) +jsna("manufacturer","Stegen")+ "}";
-    //so entity can be sensor, switch, select etc.
-    //a device SmartEVSE-1001 consists of multiple entities
-    String entity_suffix, entity_name, optional_payload;
+    const String device_payload = String(R"("device": {)") + jsn("model","SmartEVSE v3") + jsna("identifiers", MQTTprefix) + jsna("name", MQTTprefix) + jsna("manufacturer","Stegen") + jsna("configuration_url", "http://" + WiFi.localIP().toString().c_str()) + jsna("sw_version", String(VERSION)) + "}";
+    //a device SmartEVSE-1001 consists of multiple entities, and an entity can be in the domains sensor, number, select etc.
+    String entity_suffix, entity_name, optional_payload, entity_domain;
 
     //some self-updating variables here:
 #define entity_id MQTTprefix + "-" + entity_suffix
 #define entity_path MQTTprefix + "/" + entity_suffix
 #define entity_name(x) entity_name = x; entity_suffix = entity_name; entity_suffix.replace(" ", "");
-#define announce(x) entity_name(x); MQTTclient.publish("homeassistant/sensor/" + entity_id + "/config",  "{" + jsn("name", entity_name) + jsna("state_topic", entity_path) + jsna("object_id", entity_id) + jsna("unique_id", entity_id) + "," + device_payload + optional_payload + "}", true, 0);
 
-    //now set the parameters for the next batch of entities:
-    optional_payload = jsna("device_class","current") + jsna("unit_of_measurement","A") + jsna("val_tpl", R"({{ value | int / 10 }})");
+    //create template to announce an entity in it's own domain:
+#define announce(x, entity_domain) entity_name(x); MQTTclient.publish("homeassistant/" + String(entity_domain) + "/" + entity_id + "/config",  "{" + jsn("name", entity_name) + jsna("object_id", entity_id) + jsna("unique_id", entity_id) + jsna("state_topic", entity_path) + "," + device_payload + optional_payload + "}", true, 0);
 
-    //now the sensor/switch/select = entity stuff:
-    announce("Charge Current");
-    announce("Charge Current Override");
-    announce("Max Current");
-    announce("EV Charge Current");
+    //set the parameters for and announce sensors with device class 'current':
+    optional_payload = jsna("device_class","current") + jsna("unit_of_measurement","A") + jsna("value_template", R"({{ value | int / 10 }})");
+    announce("Charge Current", "sensor");
+    announce("Max Current", "sensor");
     if (MainsMeter) {
-        announce("Mains Current L1");
-        announce("Mains Current L2");
-        announce("Mains Current L3");
+        announce("Mains Current L1", "sensor");
+        announce("Mains Current L2", "sensor");
+        announce("Mains Current L3", "sensor");
     };
     if (EVMeter) {
-        announce("EV Current L1");
-        announce("EV Current L2");
-        announce("EV Current L3");
+        announce("EV Current L1", "sensor");
+        announce("EV Current L2", "sensor");
+        announce("EV Current L3", "sensor");
     };
     if (PVMeter) {
-        announce("PV Current L1");
-        announce("PV Current L2");
-        announce("PV Current L3");
+        announce("PV Current L1", "sensor");
+        announce("PV Current L2", "sensor");
+        announce("PV Current L3", "sensor");
     };
     if (homeBatteryLastUpdate) {
-        announce("Home Battery Current");
+        announce("Home Battery Current", "sensor");
     };
 
     if (Modem) {
-        //now set the parameters for the next batch of entities:
-        optional_payload = jsna("unit_of_measurement","%") + jsna("val_tpl", R"({% if value | int > -1 %} {{ value | int / 10 }} {% endif %})");
-        announce("EV Initial SoC");
-        announce("EV Full SoC");
-        announce("EV Computed SoC");
+        //set the parameters for modem/SoC sensor entities:
+        optional_payload = jsna("unit_of_measurement","%") + jsna("value_template", R"({% if value | int > -1 %} {{ value | int / 10 }} {% endif %})");
+        announce("EV Initial SoC", "sensor");
+        announce("EV Full SoC", "sensor");
+        announce("EV Computed SoC", "sensor");
     };
 
-    //now set the parameters for the next batch of entities:
+    //set the parameters for and announce sensor entities without device_class or unit_of_measurement:
     optional_payload = "";
-    announce("EV Plug State");
-    announce("Mode");
-    announce("Access");
-    announce("Error");
-    announce("State");
-    announce("RFID");
+    announce("EV Plug State", "sensor");
+    announce("Mode", "sensor");
+    announce("Access", "sensor");
+    announce("State", "sensor");
+    announce("RFID", "sensor");
 
-    //now set the parameters for the next batch of entities:
-    optional_payload = jsna("device_class","temperature") + jsna("unit_of_measurement","°C");
-    //optional_payload = jsna("unit_of_measurement","°C");
-    announce("ESP Temp");
+    //set the parameters for and announce diagnostic sensor entities:
+    optional_payload = jsna("entity_category","diagnostic");
+    announce("Error", "sensor");
+    optional_payload = jsna("entity_category","diagnostic") + jsna("device_class","temperature") + jsna("unit_of_measurement","°C");
+    announce("ESP Temp", "sensor");
+    optional_payload = jsna("entity_category","diagnostic") + jsna("device_class","duration") + jsna("unit_of_measurement","s") + jsna("entity_registry_enabled_default","False");
+    announce("ESP Uptime", "sensor");
 
+    //set the parameters for and announce other sensor entities:
     optional_payload = jsna("device_class","power") + jsna("unit_of_measurement","W");
-    announce("EV Charge Power");
+    announce("EV Charge Power", "sensor");
     optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh");
-    announce("EV Energy Charged");
+    announce("EV Energy Charged", "sensor");
+
     if (Modem) {
-        optional_payload = jsna("unit_of_measurement","%") + jsna("val_tpl", R"({{ (value | int / 1024 * 100) | round(0) }})");
-        announce("CP PWM");
-        optional_payload = jsna("device_class","current") + jsna("unit_of_measurement","A") + jsna("val_tpl", R"({% if value | int > -1 %} {{ (value | int / 1024 * 100) | round(0) }} {% else %} N/A {% endif %})");
-        announce("CP PWM Override");
+        optional_payload = jsna("unit_of_measurement","%") + jsna("value_template", R"({{ (value | int / 1024 * 100) | round(0) }})");
+        announce("CP PWM", "sensor");
+
+        optional_payload = jsna("value_template", R"({{ value if (value | int == -1) else (value | int / 1024 * 100) | round }})");
+        optional_payload += jsna("command_topic", String(MQTTprefix + "/Set/CPPWMOverride")) + jsna("min", "-1") + jsna("max", "100") + jsna("mode","slider");
+        optional_payload += jsna("command_template", R"({{  value if (value | int == -1) else (value | int * 1024 / 100) | round }})");
+        announce("CP PWM Override", "number");
     };
+
+    //set the parameters for and announce select entities, overriding automatic state_topic:
+    optional_payload = jsna("state_topic", String(MQTTprefix + "/Mode")) + jsna("command_topic", String(MQTTprefix + "/Set/Mode"));
+    optional_payload += String(R"(, "options" : ["Off", "Normal", "Smart", "Solar"])");
+    announce("Mode Selector", "select");
+
+    //set the parameters for and announce number entities:
+    optional_payload = jsna("command_topic", String(MQTTprefix + "/Set/CurrentOverride")) + jsna("min", "0") + jsna("max", MaxCurrent ) + jsna("mode","slider");
+    optional_payload += jsna("value_template", R"({{ value | int / 10 }})") + jsna("command_template", R"({{ value | int * 10 }})");
+    announce("Charge Current Override", "number");
 }
 
 void mqttPublishData() {
@@ -2434,9 +2457,9 @@ void mqttPublishData() {
     if (MQTTclient.connected()) {
         MQTTclient.publish(MQTTprefix + "/ESPUptime", String((esp_timer_get_time() / 1000000)), false, 0);
         MQTTclient.publish(MQTTprefix + "/ESPTemp", String(TempEVSE), false, 0);
-        MQTTclient.publish(MQTTprefix + "/Mode", Access_bit == 0 ? "OFF" : Mode > 3 ? "N/A" : StrMode[Mode], true, 0);
+        MQTTclient.publish(MQTTprefix + "/Mode", Access_bit == 0 ? "Off" : Mode > 3 ? "N/A" : StrMode[Mode], true, 0);
         MQTTclient.publish(MQTTprefix + "/MaxCurrent", String(MaxCurrent * 10), true, 0);
-        MQTTclient.publish(MQTTprefix + "/ChargeCurrent", String(ChargeCurrent), true, 0);
+        MQTTclient.publish(MQTTprefix + "/ChargeCurrent", String(Balanced[0]), true, 0);
         MQTTclient.publish(MQTTprefix + "/ChargeCurrentOverride", String(OverrideCurrent), true, 0);
         MQTTclient.publish(MQTTprefix + "/Access", String(StrAccessBit[Access_bit]), true, 0);
         MQTTclient.publish(MQTTprefix + "/RFID", !RFIDReader ? "Not Installed" : RFIDstatus >= 8 ? "NOSTATUS" : StrRFIDStatusWeb[RFIDstatus], true, 0);
@@ -2444,7 +2467,6 @@ void mqttPublishData() {
         MQTTclient.publish(MQTTprefix + "/Error", getErrorNameWeb(ErrorFlags), true, 0);
         MQTTclient.publish(MQTTprefix + "/EVPlugState", (pilot != PILOT_12V) ? "Connected" : "Disconnected", true, 0);
         MQTTclient.publish(MQTTprefix + "/EVChargePower", String(PowerMeasured), false, 0);
-        MQTTclient.publish(MQTTprefix + "/EVChargeCurrent", String(ChargeCurrent), false, 0);
         MQTTclient.publish(MQTTprefix + "/EVEnergyCharged", String(EnergyCharged), true, 0);
         if (Modem) {
             MQTTclient.publish(MQTTprefix + "/CPPWM", String(CurrentPWM), false, 0);
@@ -2529,21 +2551,21 @@ void Timer1S(void * parameter) {
                 //  - State STATE_B will enable CP pin again, if disabled. 
                 // This stage we are now in is just before we enable CP_PIN and resume via STATE_B
 
+                // Reset CP to idle & turn off, it will be turned on again later for another try
+                SetCPDuty(1024);
+                CP_OFF;
+
                 // Check whether the EVCCID matches the one required
                 if (strcmp(RequiredEVCCID, "") == 0 || strcmp(RequiredEVCCID, EVCCID) == 0) {
                     // We satisfied the EVCCID requirements, skip modem stages next time
                     ModemStage = 1;
 
-                    setState(STATE_B);                                     // switch to STATE_ACTSTART
+                    setState(STATE_B);                                     // switch to STATE_B
                     GLCD();                                                // Re-init LCD (200ms delay)
                 } else {
                     // We actually do not want to continue charging and re-start at modem request after 60s
                     ModemStage = 0;
                     LeaveModemDeniedStateTimer = 60;
-
-                    // Reset CP & turn off
-                    SetCPDuty(1024);
-                    CP_OFF;
 
                     // Change to MODEM_DENIED state
                     setState(STATE_MODEM_DENIED);
@@ -2556,9 +2578,9 @@ void Timer1S(void * parameter) {
             if (LeaveModemDeniedStateTimer) LeaveModemDeniedStateTimer--;
             else{
                 LeaveModemDeniedStateTimer = -1;           // reset ModemStateDeniedTimer
+                setState(STATE_A);                         // switch to STATE_B
                 CP_ON;
-                setState(STATE_A);                         // switch to STATE_MODEM_REQUEST
-                GLCD();                                                // Re-init LCD (200ms delay)
+                GLCD();                                    // Re-init LCD (200ms delay)
             }
         }
 
@@ -2575,15 +2597,14 @@ void Timer1S(void * parameter) {
 #ifdef MODEM
         // Normally, the modem is enabled when Modem == Experiment. However, after a succesfull communication has been set up, EVSE will restart communication by replugging car and moving back to state B.
         // This time, communication is not initiated. When a car is disconnected, we want to enable the modem states again, but using 12V signal is not reliable (we just "replugged" via CP pin, remember).
-        // This counter just enables the state after 60 seconds of success. 
+        // This counter just enables the state after 3 seconds of success.
         if (DisconnectTimeCounter >= 0){
             DisconnectTimeCounter++;
         }
 
-        // This state can be triggered manually in mode "OFF" or as physical unplug. 
-        if (DisconnectTimeCounter > 60){
+        if (DisconnectTimeCounter > 3){
             pilot = Pilot();
-            if (pilot == PILOT_12V && Access_bit != 0){
+            if (pilot == PILOT_12V){
                 DisconnectTimeCounter = -1;
                 DisconnectEvent();
             } else{ // Run again
@@ -3262,10 +3283,6 @@ void validate_settings(void) {
         }
     }
 
-    // RFID reader set to Enable One card, the EVSE is disabled by default
-    if (RFIDReader == 2) Access_bit = 0;
-    // Enable access if no access switch used
-    else if (Switch != 1 && Switch != 2) Access_bit = 1;
     // Sensorbox v2 has always address 0x0A
     if (MainsMeter == EM_SENSORBOX) MainsMeterAddress = 0x0A;
     // Disable PV reception if not configured
@@ -3310,6 +3327,14 @@ void read_settings(bool write) {
         Config = preferences.getUChar("Config", CONFIG); 
         Lock = preferences.getUChar("Lock", LOCK); 
         Mode = preferences.getUChar("Mode", MODE); 
+        //first determine default value for Access_bit:
+        uint8_t Default_Access_bit = 0;
+        // RFID reader set to Enable One card, the EVSE is disabled by default
+        if (RFIDReader == 2) Default_Access_bit = 0;
+        // Enable access if no access switch used
+        else if (Switch != 1 && Switch != 2) Default_Access_bit = 1;
+        // Now we know default value, lets read if from memory:
+        Access_bit = preferences.getUChar("Access", Default_Access_bit);
         LoadBl = preferences.getUChar("LoadBl", LOADBL); 
         MaxMains = preferences.getUShort("MaxMains", MAX_MAINS); 
         MaxCurrent = preferences.getUShort("MaxCurrent", MAX_CURRENT); 
@@ -3377,6 +3402,7 @@ void write_settings(void) {
     preferences.putUChar("Config", Config); 
     preferences.putUChar("Lock", Lock); 
     preferences.putUChar("Mode", Mode); 
+    preferences.putUChar("Access", Access_bit);
     preferences.putUChar("LoadBl", LoadBl); 
     preferences.putUShort("MaxMains", MaxMains); 
     preferences.putUShort("MaxCurrent", MaxCurrent); 
@@ -3605,7 +3631,7 @@ void StartwebServer(void) {
 
         boolean evConnected = pilot != PILOT_12V;                    //when access bit = 1, p.ex. in OFF mode, the STATEs are no longer updated
 
-        DynamicJsonDocument doc(1500); // https://arduinojson.org/v6/assistant/
+        DynamicJsonDocument doc(1600); // https://arduinojson.org/v6/assistant/
         doc["version"] = String(VERSION);
         doc["mode"] = mode;
         doc["mode_id"] = modeId;
