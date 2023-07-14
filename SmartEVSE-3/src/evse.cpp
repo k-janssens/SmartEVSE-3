@@ -2421,7 +2421,7 @@ void SetupMQTTClient() {
     announce("EV Charge Power", "sensor");
     optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh");
     announce("EV Energy Charged", "sensor");
-    
+
     if (Modem) {
         optional_payload = jsna("unit_of_measurement","%") + jsna("value_template", R"({{ (value | int / 1024 * 100) | round(0) }})");
         announce("CP PWM", "sensor");
