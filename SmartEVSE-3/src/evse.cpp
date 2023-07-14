@@ -2207,7 +2207,7 @@ uint8_t PollEVNode = NR_EVSES;
 #ifdef MQTT
 void mqtt_receive_callback(const String &topic, const String &payload) {
     if (topic == MQTTprefix + "/Set/Mode") {
-        if (payload == "Off") {
+        if (payload == "OFF") {
             ToModemWaitStateTimer = 0;
             ToModemDoneStateTimer = 0;
             LeaveModemDoneStateTimer = 0;
@@ -2349,7 +2349,7 @@ void SetupMQTTClient() {
     //publish MQTT discovery topics
     //we need something to make all this JSON stuff readable, without doing all this assign and serialize stuff
 #define jsn(x, y) String(R"(")") + x + R"(" : ")" + y + R"(")"
-    //jsn(device_class, current) expands to: 
+    //jsn(device_class, current) expands to:
     // R"("device_class" : "current")"
 
 #define jsna(x, y) String(R"(, )") + jsn(x, y)
@@ -2357,7 +2357,7 @@ void SetupMQTTClient() {
 
     //first all device stuff:
     const String device_payload = String(R"("device": {)") + jsn("model","SmartEVSE v3") + jsna("identifiers", MQTTprefix) + jsna("name", MQTTprefix) + jsna("manufacturer","Stegen") + jsna("configuration_url", "http://" + WiFi.localIP().toString().c_str()) + "}";
-    //a device SmartEVSE-1001 consists of multiple entities, and an entity can be sensor, switch, select etc.
+    //a device SmartEVSE-1001 consists of multiple entities, and an entity can be in the domains sensor, number, select etc.
     String entity_suffix, entity_name, optional_payload, entity_domain;
 
     //some self-updating variables here:
@@ -2410,7 +2410,7 @@ void SetupMQTTClient() {
     announce("RFID", "sensor");
 
     //set the parameters for and announce other sensor entities:
-    optional_payload = jsna("device_class","temperature") + jsna("unit_of_measurement","°C") + jsna("ent_cat", "diagnostic");
+    optional_payload = jsna("device_class","temperature") + jsna("unit_of_measurement","°C") + jsna("entity_category", "diagnostic");
     announce("ESP Temp", "sensor");
     optional_payload = jsna("device_class","power") + jsna("unit_of_measurement","W");
     announce("EV Charge Power", "sensor");
@@ -2422,12 +2422,14 @@ void SetupMQTTClient() {
         announce("CP PWM", "sensor");
 
         optional_payload = jsna("command_topic", String(MQTTprefix + "/Set/CPPWMOverride")) + jsna("min", "-1") + jsna("max", "100") + jsna("mode","slider");
-        optional_payload += jsna("value_template", R"({{ value if (value | int == -1) else (value | int / 1024 * 100) | round }})") + jsna("command_template", R"({{  value if (value | int == -1) else (value | int * 1024 / 100) | round }})");
+        optional_payload += jsna("value_template", R"({{ value if (value | int == -1) else (value | int / 1024 * 100) | round }})");
+        optional_payload += jsna("command_template", R"({{  value if (value | int == -1) else (value | int * 1024 / 100) | round }})");
         announce("CP PWM Override", "number");
     };
 
     //set the parameters for and announce select entities, overriding automatic state_topic:
-    optional_payload = jsna("state_topic", String(MQTTprefix + "/Mode")) + jsna("command_topic", String(MQTTprefix + "/Set/Mode")) +  String(R"(, "ops" : ["OFF", "Normal", "Smart", "Solar"])");
+    optional_payload = jsna("state_topic", String(MQTTprefix + "/Mode")) + jsna("command_topic", String(MQTTprefix + "/Set/Mode"));
+    optional_payload += String(R"(, "options" : ["OFF", "Normal", "Smart", "Solar"])");
     announce("Mode Selector", "select");
 
     //set the parameters for and announce number entities:
@@ -2454,7 +2456,6 @@ void mqttPublishData() {
         MQTTclient.publish(MQTTprefix + "/EVChargePower", String(PowerMeasured), false, 0);
         MQTTclient.publish(MQTTprefix + "/EVChargeCurrent", String(ChargeCurrent), false, 0);
         MQTTclient.publish(MQTTprefix + "/EVEnergyCharged", String(EnergyCharged), true, 0);
-
         if (Modem) {
             MQTTclient.publish(MQTTprefix + "/CPPWM", String(CurrentPWM), false, 0);
             MQTTclient.publish(MQTTprefix + "/CPPWMOverride", String(CPDutyOverride ? String(CurrentPWM) : "-1"), true, 0);
@@ -2477,9 +2478,8 @@ void mqttPublishData() {
             MQTTclient.publish(MQTTprefix + "/MainsCurrentL2", String(Irms[1]), false, 0);
             MQTTclient.publish(MQTTprefix + "/MainsCurrentL3", String(Irms[2]), false, 0);
         };
-        if (homeBatteryLastUpdate) {
+        if (homeBatteryLastUpdate)
             MQTTclient.publish(MQTTprefix + "/HomeBatteryCurrent", String(homeBatteryCurrent), false, 0);
-        };
     } else {
         if (WiFi.status() == WL_CONNECTED) {
             // Setup MQTT client again so we can reconnect
