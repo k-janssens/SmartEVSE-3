@@ -1560,23 +1560,26 @@ void RecomputeSoC(void) {
             // We're already at full SoC
             ComputedSoC = FullSoC;
             RemainingSoC = 0;
-        } else if (EnergyRequest > 0) {
+        } else if (EnergyRequest > 0 && EnergyCharged > 0) {
             // Attempt to use EnergyRequest to determine SoC with greater accuracy
-            // We're adding 50 Wh to EnergyCharged here to be sure we reach 100% ComputedSoC and compensate for losses
             uint32_t RemainingEnergyWh = (EnergyCharged > 0 ? EnergyRequest - (EnergyCharged) : EnergyRequest);
             if (RemainingEnergyWh > 0) {
-                ComputedSoC = FullSoC - (((double) RemainingEnergyWh / EnergyCapacity) * FullSoC);
-                RemainingSoC = FullSoC - ComputedSoC;
-                return;
+                ComputedSoC = FullSoC - (round(RemainingEnergyWh / EnergyCapacity) * FullSoC);
             } else {
                 ComputedSoC = FullSoC;
-                RemainingSoC = 0;
             }
         } else if (InitialSoC > 0) {
             // Fall back to rough estimate based on InitialSoC if we do not know the requested energy
-            ComputedSoC = InitialSoC + (((double) EnergyCharged / EnergyCapacity) * FullSoC);
-            RemainingSoC = FullSoC - ComputedSoC;
+            ComputedSoC = InitialSoC + (round(EnergyCharged / EnergyCapacity) * FullSoC);
         }
+
+        // We can't possibly charge to over 100% SoC
+        if (ComputedSoC > FullSoC) {
+            ComputedSoC = FullSoC;
+            RemainingSoC = 0;
+        }
+
+        RemainingSoC = FullSoC - ComputedSoC;
     }
     // There's also the possibility an external API/app is used for SoC info. In such case, we allow setting ComputedSoC directly.
 }
