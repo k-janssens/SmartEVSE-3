@@ -2570,7 +2570,7 @@ void Timer1S(void * parameter) {
 #ifdef MODEM
         // Normally, the modem is enabled when Modem == Experiment. However, after a succesfull communication has been set up, EVSE will restart communication by replugging car and moving back to state B.
         // This time, communication is not initiated. When a car is disconnected, we want to enable the modem states again, but using 12V signal is not reliable (we just "replugged" via CP pin, remember).
-        // This counter just enables the state after 3 seconds of success. 
+        // This counter just enables the state after 3 seconds of success.
         if (DisconnectTimeCounter >= 0){
             DisconnectTimeCounter++;
         }
