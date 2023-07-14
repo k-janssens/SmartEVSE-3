@@ -2356,7 +2356,7 @@ void SetupMQTTClient() {
     //json add expansion, same as above but now with a comma prepended
 
     //first all device stuff:
-    const String device_payload = String(R"("device": {)") + jsn("model","SmartEVSE v3") + jsna("identifiers", MQTTprefix) + jsna("name", MQTTprefix) + jsna("manufacturer","Stegen") + jsna("configuration_url", "http://" + WiFi.localIP().toString().c_str()) + "}";
+    const String device_payload = String(R"("device": {)") + jsn("model","SmartEVSE v3") + jsna("identifiers", MQTTprefix) + jsna("name", MQTTprefix) + jsna("manufacturer","Stegen") + jsna("configuration_url", "http://" + WiFi.localIP().toString().c_str()) + jsna("sw_version", String(VERSION)) + "}";
     //a device SmartEVSE-1001 consists of multiple entities, and an entity can be in the domains sensor, number, select etc.
     String entity_suffix, entity_name, optional_payload, entity_domain;
 
