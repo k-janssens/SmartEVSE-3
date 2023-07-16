@@ -1560,23 +1560,26 @@ void RecomputeSoC(void) {
             // We're already at full SoC
             ComputedSoC = FullSoC;
             RemainingSoC = 0;
-        } else if (EnergyRequest > 0) {
+        } else if (EnergyRequest > 0 && EnergyCharged > 0) {
             // Attempt to use EnergyRequest to determine SoC with greater accuracy
-            // We're adding 50 Wh to EnergyCharged here to be sure we reach 100% ComputedSoC and compensate for losses
             uint32_t RemainingEnergyWh = (EnergyCharged > 0 ? EnergyRequest - (EnergyCharged) : EnergyRequest);
             if (RemainingEnergyWh > 0) {
-                ComputedSoC = FullSoC - (((double) RemainingEnergyWh / EnergyCapacity) * FullSoC);
-                RemainingSoC = FullSoC - ComputedSoC;
-                return;
+                ComputedSoC = FullSoC - (round(RemainingEnergyWh / EnergyCapacity) * FullSoC);
             } else {
                 ComputedSoC = FullSoC;
-                RemainingSoC = 0;
             }
         } else if (InitialSoC > 0) {
             // Fall back to rough estimate based on InitialSoC if we do not know the requested energy
-            ComputedSoC = InitialSoC + (((double) EnergyCharged / EnergyCapacity) * FullSoC);
-            RemainingSoC = FullSoC - ComputedSoC;
+            ComputedSoC = InitialSoC + (round(EnergyCharged / EnergyCapacity) * FullSoC);
         }
+
+        // We can't possibly charge to over 100% SoC
+        if (ComputedSoC > FullSoC) {
+            ComputedSoC = FullSoC;
+            RemainingSoC = 0;
+        }
+
+        RemainingSoC = FullSoC - ComputedSoC;
     }
     // There's also the possibility an external API/app is used for SoC info. In such case, we allow setting ComputedSoC directly.
 }
@@ -2318,6 +2321,12 @@ void mqtt_receive_callback(const String &topic, const String &payload) {
     } else if (topic == MQTTprefix + "/Set/HomeBatteryCurrent") {
         homeBatteryCurrent = payload.toInt();
         homeBatteryLastUpdate = time(NULL);
+    } else if (topic == MQTTprefix + "/Set/RequiredEVCCID") {
+        strncpy(RequiredEVCCID, payload.c_str(), sizeof(RequiredEVCCID));
+        if (preferences.begin("settings", false) ) {                        //false = write mode
+            preferences.putString("RequiredEVCCID", String(RequiredEVCCID));
+            preferences.end();
+        }
     }
 
     // Make sure MQTT updates directly to prevent debounces
@@ -2402,10 +2411,19 @@ void SetupMQTTClient() {
 
     if (Modem) {
         //set the parameters for modem/SoC sensor entities:
-        optional_payload = jsna("unit_of_measurement","%") + jsna("value_template", R"({% if value | int > -1 %} {{ value | int / 10 }} {% endif %})");
+        optional_payload = jsna("unit_of_measurement","%") + jsna("value_template", R"({% if value | int > -1 %} {{ value }} {% endif %})");
         announce("EV Initial SoC", "sensor");
         announce("EV Full SoC", "sensor");
         announce("EV Computed SoC", "sensor");
+        announce("EV Remaining SoC", "sensor");
+
+        optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh");
+        announce("EV Energy Capacity", "sensor");
+        announce("EV Energy Request", "sensor");
+
+        optional_payload = "";
+        announce("EVCCID", "sensor");
+        announce("Required EVCCID", "sensor");
     };
 
     //set the parameters for and announce sensor entities without device_class or unit_of_measurement:
@@ -2419,6 +2437,10 @@ void SetupMQTTClient() {
     //set the parameters for and announce diagnostic sensor entities:
     optional_payload = jsna("entity_category","diagnostic");
     announce("Error", "sensor");
+    announce("WiFi SSID", "sensor");
+    announce("WiFi BSSID", "sensor");
+    optional_payload = jsna("entity_category","diagnostic") + jsna("device_class","signal_strength") + jsna("unit_of_measurement","dBm");
+    announce("WiFi RSSI", "sensor");
     optional_payload = jsna("entity_category","diagnostic") + jsna("device_class","temperature") + jsna("unit_of_measurement","°C");
     announce("ESP Temp", "sensor");
     optional_payload = jsna("entity_category","diagnostic") + jsna("device_class","duration") + jsna("unit_of_measurement","s") + jsna("entity_registry_enabled_default","False");
@@ -2468,12 +2490,20 @@ void mqttPublishData() {
         MQTTclient.publish(MQTTprefix + "/EVPlugState", (pilot != PILOT_12V) ? "Connected" : "Disconnected", true, 0);
         MQTTclient.publish(MQTTprefix + "/EVChargePower", String(PowerMeasured), false, 0);
         MQTTclient.publish(MQTTprefix + "/EVEnergyCharged", String(EnergyCharged), true, 0);
+        MQTTclient.publish(MQTTprefix + "/WiFiSSID", String(WiFi.SSID()), true, 0);
+        MQTTclient.publish(MQTTprefix + "/WiFiBSSID", String(WiFi.BSSIDstr()), true, 0);
+        MQTTclient.publish(MQTTprefix + "/WiFiRSSI", String(WiFi.RSSI()), false, 0);
         if (Modem) {
             MQTTclient.publish(MQTTprefix + "/CPPWM", String(CurrentPWM), false, 0);
             MQTTclient.publish(MQTTprefix + "/CPPWMOverride", String(CPDutyOverride ? String(CurrentPWM) : "-1"), true, 0);
             MQTTclient.publish(MQTTprefix + "/EVInitialSoC", String(InitialSoC), true, 0);
             MQTTclient.publish(MQTTprefix + "/EVFullSoC", String(FullSoC), true, 0);
             MQTTclient.publish(MQTTprefix + "/EVComputedSoC", String(ComputedSoC), true, 0);
+            MQTTclient.publish(MQTTprefix + "/EVRemainingSoC", String(RemainingSoC), true, 0);
+            MQTTclient.publish(MQTTprefix + "/EVEnergyCapacity", String(EnergyCapacity), true, 0);
+            MQTTclient.publish(MQTTprefix + "/EVEnergyRequest", String(EnergyRequest), true, 0);
+            MQTTclient.publish(MQTTprefix + "/EVCCID", String(EVCCID), true, 0);
+            MQTTclient.publish(MQTTprefix + "/RequiredEVCCID", String(RequiredEVCCID), true, 0);
         };
         if (EVMeter) {
             MQTTclient.publish(MQTTprefix + "/EVCurrentL1", String(Irms_EV[0]), false, 0);
