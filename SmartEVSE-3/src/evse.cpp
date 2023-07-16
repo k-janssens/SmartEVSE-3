@@ -2425,6 +2425,10 @@ void SetupMQTTClient() {
         announce("EVCCID", "sensor");
         announce("Required EVCCID", "sensor");
 
+        optional_payload = jsna("state_topic", String(MQTTprefix + "/RequiredEVCCID")) + jsna("command_topic", String(MQTTprefix + "/Set/RequiredEVCCID"));
+        announce("Update Required EVCCID", "text");
+    };
+
     if (EVMeter) {
         //set the parameters for and announce other sensor entities:
         optional_payload = jsna("device_class","power") + jsna("unit_of_measurement","W");
