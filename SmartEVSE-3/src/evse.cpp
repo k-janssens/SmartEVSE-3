@@ -2423,10 +2423,8 @@ void SetupMQTTClient() {
 
         optional_payload = jsna("value_template", R"({{ none if (value == '') else value }})");
         announce("EVCCID", "sensor");
-        announce("Required EVCCID", "sensor");
-
         optional_payload = jsna("state_topic", String(MQTTprefix + "/RequiredEVCCID")) + jsna("command_topic", String(MQTTprefix + "/Set/RequiredEVCCID"));
-        announce("Update Required EVCCID", "text");
+        announce("Required EVCCID", "text");
     };
 
     if (EVMeter) {
@@ -2440,7 +2438,6 @@ void SetupMQTTClient() {
     //set the parameters for and announce sensor entities without device_class or unit_of_measurement:
     optional_payload = "";
     announce("EV Plug State", "sensor");
-    announce("Mode", "sensor");
     announce("Access", "sensor");
     announce("State", "sensor");
     announce("RFID", "sensor");
@@ -2470,11 +2467,11 @@ void SetupMQTTClient() {
     //set the parameters for and announce select entities, overriding automatic state_topic:
     optional_payload = jsna("state_topic", String(MQTTprefix + "/Mode")) + jsna("command_topic", String(MQTTprefix + "/Set/Mode"));
     optional_payload += String(R"(, "options" : ["Off", "Normal", "Smart", "Solar"])");
-    announce("Mode Selector", "select");
+    announce("Mode", "select");
 
     //set the parameters for and announce number entities:
     optional_payload = jsna("command_topic", String(MQTTprefix + "/Set/CurrentOverride")) + jsna("min", "0") + jsna("max", MaxCurrent ) + jsna("mode","slider");
-    optional_payload += jsna("value_template", R"({{ none if (value | int == -1) else (value | int / 10) }})") + jsna("command_template", R"({{ value | int * 10 }})");
+    optional_payload += jsna("value_template", R"({{ none if (value | int == 0) else (value | int / 10) }})") + jsna("command_template", R"({{ value | int * 10 }})");
     announce("Charge Current Override", "number");
 }
 
