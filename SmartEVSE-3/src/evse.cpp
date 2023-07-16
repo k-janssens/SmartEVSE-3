@@ -2420,7 +2420,7 @@ void SetupMQTTClient() {
         optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh") + jsna("value_template", R"({{ none if (value | int == -1) else (value | int) }})");
         announce("EV Energy Capacity", "sensor");
         announce("EV Energy Request", "sensor");
- 
+
         optional_payload = jsna("value_template", R"({{ none if (value == '') else value }})");
         announce("EVCCID", "sensor");
         announce("Required EVCCID", "sensor");
