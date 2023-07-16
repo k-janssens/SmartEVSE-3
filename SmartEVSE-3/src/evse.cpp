@@ -2411,17 +2411,17 @@ void SetupMQTTClient() {
 
     if (Modem) {
         //set the parameters for modem/SoC sensor entities:
-        optional_payload = jsna("unit_of_measurement","%") + jsna("value_template", R"({% if value | int > -1 %} {{ value }} {% endif %})");
+        optional_payload = jsna("unit_of_measurement","%") + jsna("value_template", R"({{ none if (value | int == -1) else (value | int) }})");
         announce("EV Initial SoC", "sensor");
         announce("EV Full SoC", "sensor");
         announce("EV Computed SoC", "sensor");
         announce("EV Remaining SoC", "sensor");
 
-        optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh");
+        optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh") + jsna("value_template", R"({{ none if (value | int == -1) else (value | int) }})");
         announce("EV Energy Capacity", "sensor");
         announce("EV Energy Request", "sensor");
-
-        optional_payload = "";
+ 
+        optional_payload = jsna("value_template", R"({{ none if (value == '') else value }})");
         announce("EVCCID", "sensor");
         announce("Required EVCCID", "sensor");
     };
@@ -2456,9 +2456,9 @@ void SetupMQTTClient() {
         optional_payload = jsna("unit_of_measurement","%") + jsna("value_template", R"({{ (value | int / 1024 * 100) | round(0) }})");
         announce("CP PWM", "sensor");
 
-        optional_payload = jsna("value_template", R"({{ value if (value | int == -1) else (value | int / 1024 * 100) | round }})");
+        optional_payload = jsna("value_template", R"({{ none if (value | int == -1) else (value | int / 1024 * 100) | round }})");
         optional_payload += jsna("command_topic", String(MQTTprefix + "/Set/CPPWMOverride")) + jsna("min", "-1") + jsna("max", "100") + jsna("mode","slider");
-        optional_payload += jsna("command_template", R"({{  value if (value | int == -1) else (value | int * 1024 / 100) | round }})");
+        optional_payload += jsna("command_template", R"({{ (value | int * 1024 / 100) | round }})");
         announce("CP PWM Override", "number");
     };
 
@@ -2469,7 +2469,7 @@ void SetupMQTTClient() {
 
     //set the parameters for and announce number entities:
     optional_payload = jsna("command_topic", String(MQTTprefix + "/Set/CurrentOverride")) + jsna("min", "0") + jsna("max", MaxCurrent ) + jsna("mode","slider");
-    optional_payload += jsna("value_template", R"({{ value | int / 10 }})") + jsna("command_template", R"({{ value | int * 10 }})");
+    optional_payload += jsna("value_template", R"({{ none if (value | int == -1) else (value | int / 10) }})") + jsna("command_template", R"({{ value | int * 10 }})");
     announce("Charge Current Override", "number");
 }
 
