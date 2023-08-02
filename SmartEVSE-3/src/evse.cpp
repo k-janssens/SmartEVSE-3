@@ -2447,7 +2447,7 @@ void SetupMQTTClient() {
         //set the parameters for and announce other sensor entities:
         optional_payload = jsna("device_class","power") + jsna("unit_of_measurement","W");
         announce("EV Charge Power", "sensor");
-        optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh");
+        optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh") + jsna("state_class","total_increasing");
         announce("EV Energy Charged", "sensor");
     }
 
