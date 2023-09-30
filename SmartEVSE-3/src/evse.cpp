@@ -2476,7 +2476,7 @@ void SetupMQTTClient() {
         announce("EV Computed SoC", "sensor");
         announce("EV Remaining SoC", "sensor");
 
-        optional_payload = jsna("device_class","duration") + jsna("unit_of_measurement","m") + jsna("value_template", R"({{ none if (value | int == -1) else (value | int / 60 | round(1)) }})");
+        optional_payload = jsna("device_class","duration") + jsna("unit_of_measurement","m") + jsna("value_template", R"({{ none if (value | int == -1) else (value | int / 60) | round }})");
         announce("EV Time Until Full", "sensor");
 
         optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh") + jsna("value_template", R"({{ none if (value | int == -1) else (value | int) }})");
