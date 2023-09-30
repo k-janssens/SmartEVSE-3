@@ -1589,8 +1589,8 @@ void RecomputeSoC(void) {
                     TimeToGo = (3600 * EnergyRemaining) / (MaxCapacity * (Nr_Of_Phases_Charging * 230));
                 }
 
-                // Wait until we have a somewhat sensible estimation
-                if (TimeToGo < 50000) {
+                // Wait until we have a somewhat sensible estimation while still respecting granny chargers
+                if (TimeToGo < 100000) {
                     TimeUntilFull = TimeToGo;
                 }
             }
