@@ -76,9 +76,9 @@ String MQTTprefix = APhostname;
 String MQTTHost = "";
 uint16_t MQTTPort;
 
-bool MQTTconfigured = false;
 TaskHandle_t MqttTaskHandle = NULL;
 uint8_t lastMqttUpdate = 0;
+std::mutex pub_mtx;
 #endif
 
 ESPAsync_WiFiManager ESPAsync_wifiManager(&webServer, &dnsServer, APhostname.c_str());
@@ -243,7 +243,7 @@ int32_t EnergyCharged = 0;                                                  // k
 int32_t EnergyMeterStart = 0;                                               // kWh meter value is stored once EV is connected to EVSE (Wh)
 int32_t PowerMeasured = 0;                                                  // Measured Charge power in Watt by kWh meter
 uint8_t RFIDstatus = 0;
-int32_t EnergyEV = 0;   
+int32_t EnergyEV = 0;                                                       // Wh -> EV_import_active_energy - EV_export_active_energy
 int32_t Mains_export_active_energy = 0;                                     // Mainsmeter exported active energy, only for API purposes so you can guard the
                                                                             // enery usage of your house
 int32_t Mains_import_active_energy = 0;                                     // Mainsmeter imported active energy, only for API purposes so you can guard the
@@ -1623,6 +1623,26 @@ void UpdateCurrentData(void) {
         Imeasured_EV = 0;
     }
 
+#ifdef MQTT
+    if (MQTTclient.connected()) {
+        std::lock_guard<std::mutex> lck(pub_mtx);
+        if (MainsMeter) {
+            MQTTclient.publish(MQTTprefix + "/MainsCurrentL1", String(Irms[0]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/MainsCurrentL2", String(Irms[1]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/MainsCurrentL3", String(Irms[2]), false, 0);
+        }
+        if (EVMeter) {
+            MQTTclient.publish(MQTTprefix + "/EVCurrentL1", String(Irms_EV[0]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/EVCurrentL2", String(Irms_EV[1]), false, 0);
+            MQTTclient.publish(MQTTprefix + "/EVCurrentL3", String(Irms_EV[2]), false, 0);
+        }
+        if (PVMeter) {
+            MQTTclient.publish(MQTTprefix + "/PVCurrentL1", String(PV[0] > 100 ? (uint) PV[0] / 100 : 0), false, 0);
+            MQTTclient.publish(MQTTprefix + "/PVCurrentL2", String(PV[1] > 100 ? (uint) PV[1] / 100 : 0), false, 0);
+            MQTTclient.publish(MQTTprefix + "/PVCurrentL3", String(PV[2] > 100 ? (uint) PV[2] / 100 : 0), false, 0);
+        }
+    }
+#endif
     // Load Balancing mode: Smart/Master or Disabled
     // not needed for subpanel mode
     if (Mode && LoadBl < 2) {
@@ -2345,6 +2365,8 @@ void SetupMQTTClient() {
     // Setup and connect MQTT client instance
     MQTTclient.setHost(MQTTHost.c_str(), MQTTPort);
 
+    MQTTclient.setWill(String(MQTTprefix + "/connected").c_str(), "offline", true, 0);
+
     if (MQTTuser != "" && MQTTpassword != "") {
         MQTTclient.connect(APhostname.c_str(), MQTTuser.c_str(), MQTTpassword.c_str());
     } else {
@@ -2360,9 +2382,9 @@ void SetupMQTTClient() {
 
         // Set up subscriptions
         MQTTclient.subscribe(String(MQTTprefix + "/Set/#"));
-    }
 
-    MQTTconfigured = true;
+        MQTTclient.publish(MQTTprefix+"/connected", "online", true, 0);
+    }
 
     //publish MQTT discovery topics
     //we need something to make all this JSON stuff readable, without doing all this assign and serialize stuff
@@ -2376,7 +2398,7 @@ void SetupMQTTClient() {
     //first all device stuff:
     const String device_payload = String(R"("device": {)") + jsn("model","SmartEVSE v3") + jsna("identifiers", MQTTprefix) + jsna("name", MQTTprefix) + jsna("manufacturer","Stegen") + jsna("configuration_url", "http://" + WiFi.localIP().toString().c_str()) + jsna("sw_version", String(VERSION)) + "}";
     //a device SmartEVSE-1001 consists of multiple entities, and an entity can be in the domains sensor, number, select etc.
-    String entity_suffix, entity_name, optional_payload, entity_domain;
+    String entity_suffix, entity_name, optional_payload;
 
     //some self-updating variables here:
 #define entity_id MQTTprefix + "-" + entity_suffix
@@ -2384,7 +2406,17 @@ void SetupMQTTClient() {
 #define entity_name(x) entity_name = x; entity_suffix = entity_name; entity_suffix.replace(" ", "");
 
     //create template to announce an entity in it's own domain:
-#define announce(x, entity_domain) entity_name(x); MQTTclient.publish("homeassistant/" + String(entity_domain) + "/" + entity_id + "/config",  "{" + jsn("name", entity_name) + jsna("object_id", entity_id) + jsna("unique_id", entity_id) + jsna("state_topic", entity_path) + "," + device_payload + optional_payload + "}", true, 0);
+#define announce(x, entity_domain) entity_name(x); \
+    MQTTclient.publish("homeassistant/" + String(entity_domain) + "/" + entity_id + "/config", \
+     "{" \
+        + jsn("name", entity_name) \
+        + jsna("object_id", entity_id) \
+        + jsna("unique_id", entity_id) \
+        + jsna("state_topic", entity_path) \
+        + jsna("availability_topic",String(MQTTprefix+"/connected")) \
+        + ", " + device_payload + optional_payload \
+        + "}", \
+    true, 0); // Retain + QoS 0
 
     //set the parameters for and announce sensors with device class 'current':
     optional_payload = jsna("device_class","current") + jsna("unit_of_measurement","A") + jsna("value_template", R"({{ value | int / 10 }})");
@@ -2394,42 +2426,52 @@ void SetupMQTTClient() {
         announce("Mains Current L1", "sensor");
         announce("Mains Current L2", "sensor");
         announce("Mains Current L3", "sensor");
-    };
+    }
     if (EVMeter) {
         announce("EV Current L1", "sensor");
         announce("EV Current L2", "sensor");
         announce("EV Current L3", "sensor");
-    };
+    }
     if (PVMeter) {
         announce("PV Current L1", "sensor");
         announce("PV Current L2", "sensor");
         announce("PV Current L3", "sensor");
-    };
+    }
     if (homeBatteryLastUpdate) {
         announce("Home Battery Current", "sensor");
-    };
+    }
 
     if (Modem) {
         //set the parameters for modem/SoC sensor entities:
-        optional_payload = jsna("unit_of_measurement","%") + jsna("value_template", R"({% if value | int > -1 %} {{ value }} {% endif %})");
+        optional_payload = jsna("unit_of_measurement","%") + jsna("value_template", R"({{ none if (value | int == -1) else (value | int) }})");
         announce("EV Initial SoC", "sensor");
         announce("EV Full SoC", "sensor");
         announce("EV Computed SoC", "sensor");
         announce("EV Remaining SoC", "sensor");
 
-        optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh");
+        optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh") + jsna("value_template", R"({{ none if (value | int == -1) else (value | int) }})");
         announce("EV Energy Capacity", "sensor");
         announce("EV Energy Request", "sensor");
 
-        optional_payload = "";
+        optional_payload = jsna("value_template", R"({{ none if (value == '') else value }})");
         announce("EVCCID", "sensor");
-        announce("Required EVCCID", "sensor");
-    };
+        optional_payload = jsna("state_topic", String(MQTTprefix + "/RequiredEVCCID")) + jsna("command_topic", String(MQTTprefix + "/Set/RequiredEVCCID"));
+        announce("Required EVCCID", "text");
+    }
+
+    if (EVMeter) {
+        //set the parameters for and announce other sensor entities:
+        optional_payload = jsna("device_class","power") + jsna("unit_of_measurement","W");
+        announce("EV Charge Power", "sensor");
+        optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh");
+        announce("EV Energy Charged", "sensor");
+        optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh") + jsna("state_class","total_increasing");
+        announce("EV Total Energy Charged", "sensor");
+    }
 
     //set the parameters for and announce sensor entities without device_class or unit_of_measurement:
     optional_payload = "";
     announce("EV Plug State", "sensor");
-    announce("Mode", "sensor");
     announce("Access", "sensor");
     announce("State", "sensor");
     announce("RFID", "sensor");
@@ -2446,30 +2488,24 @@ void SetupMQTTClient() {
     optional_payload = jsna("entity_category","diagnostic") + jsna("device_class","duration") + jsna("unit_of_measurement","s") + jsna("entity_registry_enabled_default","False");
     announce("ESP Uptime", "sensor");
 
-    //set the parameters for and announce other sensor entities:
-    optional_payload = jsna("device_class","power") + jsna("unit_of_measurement","W");
-    announce("EV Charge Power", "sensor");
-    optional_payload = jsna("device_class","energy") + jsna("unit_of_measurement","Wh");
-    announce("EV Energy Charged", "sensor");
-
     if (Modem) {
         optional_payload = jsna("unit_of_measurement","%") + jsna("value_template", R"({{ (value | int / 1024 * 100) | round(0) }})");
         announce("CP PWM", "sensor");
 
-        optional_payload = jsna("value_template", R"({{ value if (value | int == -1) else (value | int / 1024 * 100) | round }})");
+        optional_payload = jsna("value_template", R"({{ none if (value | int == -1) else (value | int / 1024 * 100) | round }})");
         optional_payload += jsna("command_topic", String(MQTTprefix + "/Set/CPPWMOverride")) + jsna("min", "-1") + jsna("max", "100") + jsna("mode","slider");
-        optional_payload += jsna("command_template", R"({{  value if (value | int == -1) else (value | int * 1024 / 100) | round }})");
+        optional_payload += jsna("command_template", R"({{ (value | int * 1024 / 100) | round }})");
         announce("CP PWM Override", "number");
-    };
+    }
 
     //set the parameters for and announce select entities, overriding automatic state_topic:
     optional_payload = jsna("state_topic", String(MQTTprefix + "/Mode")) + jsna("command_topic", String(MQTTprefix + "/Set/Mode"));
     optional_payload += String(R"(, "options" : ["Off", "Normal", "Smart", "Solar"])");
-    announce("Mode Selector", "select");
+    announce("Mode", "select");
 
     //set the parameters for and announce number entities:
     optional_payload = jsna("command_topic", String(MQTTprefix + "/Set/CurrentOverride")) + jsna("min", "0") + jsna("max", MaxCurrent ) + jsna("mode","slider");
-    optional_payload += jsna("value_template", R"({{ value | int / 10 }})") + jsna("command_template", R"({{ value | int * 10 }})");
+    optional_payload += jsna("value_template", R"({{ none if (value | int == 0) else (value | int / 10) }})") + jsna("command_template", R"({{ value | int * 10 }})");
     announce("Charge Current Override", "number");
 }
 
@@ -2477,6 +2513,7 @@ void mqttPublishData() {
     lastMqttUpdate = 0;
 
     if (MQTTclient.connected()) {
+        std::lock_guard<std::mutex> lck(pub_mtx);
         MQTTclient.publish(MQTTprefix + "/ESPUptime", String((esp_timer_get_time() / 1000000)), false, 0);
         MQTTclient.publish(MQTTprefix + "/ESPTemp", String(TempEVSE), false, 0);
         MQTTclient.publish(MQTTprefix + "/Mode", Access_bit == 0 ? "Off" : Mode > 3 ? "N/A" : StrMode[Mode], true, 0);
@@ -2488,8 +2525,6 @@ void mqttPublishData() {
         MQTTclient.publish(MQTTprefix + "/State", getStateNameWeb(State), true, 0);
         MQTTclient.publish(MQTTprefix + "/Error", getErrorNameWeb(ErrorFlags), true, 0);
         MQTTclient.publish(MQTTprefix + "/EVPlugState", (pilot != PILOT_12V) ? "Connected" : "Disconnected", true, 0);
-        MQTTclient.publish(MQTTprefix + "/EVChargePower", String(PowerMeasured), false, 0);
-        MQTTclient.publish(MQTTprefix + "/EVEnergyCharged", String(EnergyCharged), true, 0);
         MQTTclient.publish(MQTTprefix + "/WiFiSSID", String(WiFi.SSID()), true, 0);
         MQTTclient.publish(MQTTprefix + "/WiFiBSSID", String(WiFi.BSSIDstr()), true, 0);
         MQTTclient.publish(MQTTprefix + "/WiFiRSSI", String(WiFi.RSSI()), false, 0);
@@ -2504,22 +2539,12 @@ void mqttPublishData() {
             MQTTclient.publish(MQTTprefix + "/EVEnergyRequest", String(EnergyRequest), true, 0);
             MQTTclient.publish(MQTTprefix + "/EVCCID", String(EVCCID), true, 0);
             MQTTclient.publish(MQTTprefix + "/RequiredEVCCID", String(RequiredEVCCID), true, 0);
-        };
+        }
         if (EVMeter) {
-            MQTTclient.publish(MQTTprefix + "/EVCurrentL1", String(Irms_EV[0]), false, 0);
-            MQTTclient.publish(MQTTprefix + "/EVCurrentL2", String(Irms_EV[1]), false, 0);
-            MQTTclient.publish(MQTTprefix + "/EVCurrentL3", String(Irms_EV[2]), false, 0);
-        };
-        if (PVMeter) {
-            MQTTclient.publish(MQTTprefix + "/PVCurrentL1", String(PV[0] > 100 ? (uint) PV[0] / 100 : 0), false, 0);
-            MQTTclient.publish(MQTTprefix + "/PVCurrentL2", String(PV[1] > 100 ? (uint) PV[1] / 100 : 0), false, 0);
-            MQTTclient.publish(MQTTprefix + "/PVCurrentL3", String(PV[2] > 100 ? (uint) PV[2] / 100 : 0), false, 0);
-        };
-        if (MainsMeter) {
-            MQTTclient.publish(MQTTprefix + "/MainsCurrentL1", String(Irms[0]), false, 0);
-            MQTTclient.publish(MQTTprefix + "/MainsCurrentL2", String(Irms[1]), false, 0);
-            MQTTclient.publish(MQTTprefix + "/MainsCurrentL3", String(Irms[2]), false, 0);
-        };
+            MQTTclient.publish(MQTTprefix + "/EVChargePower", String(PowerMeasured), false, 0);
+            MQTTclient.publish(MQTTprefix + "/EVEnergyCharged", String(EnergyCharged), true, 0);
+            MQTTclient.publish(MQTTprefix + "/EVTotalEnergyCharged", String(EnergyEV), false, 0);
+        }
         if (homeBatteryLastUpdate)
             MQTTclient.publish(MQTTprefix + "/HomeBatteryCurrent", String(homeBatteryCurrent), false, 0);
     } else {
@@ -2833,7 +2858,7 @@ void Timer1S(void * parameter) {
         // Process MQTT data
         MQTTclient.loop();
 
-        if (MQTTconfigured && lastMqttUpdate++ >= 10) {
+        if (lastMqttUpdate++ >= 10) {
             // Publish latest data, every 10 seconds
             // We will try to publish data faster if something has changed
             mqttPublishData();
@@ -3593,7 +3618,7 @@ void StartwebServer(void) {
     });
 
     webServer.on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "text/html", "spiffs.bin updates the SPIFFS partition<br>firmware.bin updates the main firmware<br><form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='update'><input type='submit' value='Update'></form>");
+        request->send(200, "text/html", "First flash firmware.bin to update the main firmware.<br>Then flash spiffs.bin to update the SPIFFS partition, which provides the webserver user interface.<br>You should only flash files with those exact names.<br>If you want to telnet to your SmartEVSE to see the debug messages you should rename firmware.debug.bin to firmware.bin and flash that file.<br><form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='update'><input type='submit' value='Update'></form>");
     });
 
     webServer.on("/update", HTTP_POST, [](AsyncWebServerRequest *request) {
@@ -3733,14 +3758,10 @@ void StartwebServer(void) {
         doc["mqtt"]["username"] = MQTTuser;
         doc["mqtt"]["password_set"] = MQTTpassword != "";
 
-        if (MQTTconfigured) {
-            if (MQTTclient.connected()) {
-                doc["mqtt"]["status"] = "Connected";
-            } else {
-                doc["mqtt"]["status"] = "Disconnected";
-            }
+        if (MQTTclient.connected()) {
+            doc["mqtt"]["status"] = "Connected";
         } else {
-            doc["mqtt"]["status"] = "Unconfigured";
+            doc["mqtt"]["status"] = "Disconnected";
         }
 #endif
 
