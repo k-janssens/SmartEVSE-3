@@ -1561,7 +1561,7 @@ void RecomputeSoC(void) {
             // We're already at full SoC
             ComputedSoC = FullSoC;
             RemainingSoC = 0;
-            TimeUntilFull = 0;
+            TimeUntilFull = -1;
         } else {
             int EnergyRemaining = -1;
             int TargetEnergyCapacity = (FullSoC / 100.f) * EnergyCapacity;
@@ -1574,7 +1574,7 @@ void RecomputeSoC(void) {
                 EnergyRemaining = TargetEnergyCapacity - (EnergyCharged + (InitialSoC / 100.f) * EnergyCapacity);
             }
 
-            RemainingSoC = ((FullSoC * EnergyRemaining) / TargetEnergyCapacity) + 1;
+            RemainingSoC = ((FullSoC * EnergyRemaining) / TargetEnergyCapacity);
             ComputedSoC = RemainingSoC > 1 ? (FullSoC - RemainingSoC) : FullSoC;
 
             // Only attempt to compute the SoC and TimeUntilFull if we have a EnergyRemaining and PowerMeasured
@@ -1599,7 +1599,7 @@ void RecomputeSoC(void) {
             if (ComputedSoC > FullSoC) {
                 ComputedSoC = FullSoC;
                 RemainingSoC = 0;
-                TimeUntilFull = 0;
+                TimeUntilFull = -1;
             }
 
             _LOG_I("SoC: EnergyRemaining %i RemaningSoC %i EnergyRequest %i EnergyCharged %i EnergyCapacity %i ComputedSoC %i FullSoC %i TimeUntilFull %i TargetEnergyCapacity %i\n", EnergyRemaining, RemainingSoC, EnergyRequest, EnergyCharged, EnergyCapacity, ComputedSoC, FullSoC, TimeUntilFull, TargetEnergyCapacity);
