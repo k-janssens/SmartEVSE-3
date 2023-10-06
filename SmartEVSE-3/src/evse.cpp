@@ -1620,6 +1620,7 @@ void DisconnectEvent(void){
     RemainingSoC = -1;
     ComputedSoC = -1;
     EnergyCapacity = -1;
+    EnergyRequest = -1;
     TimeUntilFull = -1;
     strncpy(EVCCID, "", sizeof(EVCCID));
 }
