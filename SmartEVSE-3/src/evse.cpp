@@ -3647,6 +3647,7 @@ AsyncWebParameter * getParamFromRequest(AsyncWebServerRequest *request, String n
     throw 1;
 }
 
+
 void StartwebServer(void) {
 
     webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -3906,12 +3907,18 @@ void StartwebServer(void) {
             try {
                 String DelayedStartTimeStr = getParamFromRequest(request, "starttime")->value();
                 //string time_str = "2023-04-14T11:31";
-                if (!StoreTimeString(DelayedStartTimeStr, &DelayedStartTime) && DelayedStartTime.diff > 0) {
-                    //parse OK, switch to OFF, we are Delayed Charging
-                    setAccess(0);
-                } 
+                if (!StoreTimeString(DelayedStartTimeStr, &DelayedStartTime)) {
+                    //parse OK
+                    if (DelayedStartTime.diff > 0)
+                        setAccess(0);                         //switch to OFF, we are Delayed Charging
+                    else {//we are in the past so no delayed charging
+                        DelayedStartTime.epoch2 = DELAYEDSTARTTIME;
+                        DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
+                        DelayedRepeat = 0;
+                    }
+                }
                 else {
-                    //we couldn't parse the string or we are in the past, so we are NOT Delayed Charging
+                    //we couldn't parse the string, so we are NOT Delayed Charging
                     DelayedStartTime.epoch2 = DELAYEDSTARTTIME;
                     DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
                     DelayedRepeat = 0;
@@ -3933,12 +3940,13 @@ void StartwebServer(void) {
                             //we couldn't parse the string, so no DelayedStopTime
                             DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
                         doc["stoptime"] = (DelayedStopTime.epoch2 ? DelayedStopTime.epoch2 + EPOCH2_OFFSET : 0);
-
-                        int Repeat = getParamFromRequest(request, "repeat")->value().toInt();
-                        if (Repeat >= 0 && Repeat <= 1) {                                   //boundary check
-                            DelayedRepeat = Repeat;
-                            doc["repeat"] = Repeat;
-                        }
+                        try{
+                            int Repeat = getParamFromRequest(request, "repeat")->value().toInt();
+                            if (Repeat >= 0 && Repeat <= 1) {                                   //boundary check
+                                DelayedRepeat = Repeat;
+                                doc["repeat"] = Repeat;
+                            }
+                        } catch(...){}
                     }catch(...){}
 
                 }
@@ -4003,7 +4011,7 @@ void StartwebServer(void) {
             }catch(...){}
         }
 
-       try {
+        try {
             int current = getParamFromRequest(request, "solar_start_current")->value().toInt();
             if(current >= 0 && current <= 48) {
                 StartCurrent = current;
@@ -4059,48 +4067,45 @@ void StartwebServer(void) {
 
 #ifdef MQTT
         try {
-            if (getParamFromRequest(request, "mqtt_update")->value().toInt() != 1) {
-                throw 2;
-            }
+            if (getParamFromRequest(request, "mqtt_update")->value().toInt() == 1) {
+                try {
+                    MQTTHost = getParamFromRequest(request, "mqtt_host")->value();
+                    doc["mqtt_host"] = MQTTHost;
+                }catch(...){}
 
-            try {
-                MQTTHost = getParamFromRequest(request, "mqtt_host")->value();
-                doc["mqtt_host"] = MQTTHost;
-            }catch(...){}
+                try {
+                    MQTTPort = getParamFromRequest(request, "mqtt_port")->value().toInt();
+                    if (MQTTPort == 0) MQTTPort = 1883;
+                    doc["mqtt_port"] = MQTTPort;
+                }catch(...){}
 
-            try {
-                MQTTPort = getParamFromRequest(request, "mqtt_port")->value().toInt();
-                if (MQTTPort == 0) MQTTPort = 1883;
-                doc["mqtt_port"] = MQTTPort;
-            }catch(...){}
+                try {
+                    MQTTprefix = getParamFromRequest(request, "mqtt_topic_prefix")->value();
+                    if (!MQTTprefix || MQTTprefix == "") {
+                        MQTTprefix = APhostname;
+                    }
+                    doc["mqtt_topic_prefix"] = MQTTprefix;
+                }catch(...){}
 
-            try {
-                MQTTprefix = getParamFromRequest(request, "mqtt_topic_prefix")->value();
-                if (!MQTTprefix || MQTTprefix == "") {
-                    MQTTprefix = APhostname;
-                }
-                doc["mqtt_topic_prefix"] = MQTTprefix;
-            }catch(...){}
+                try {
+                    MQTTuser = getParamFromRequest(request, "mqtt_username")->value();
+                    if (!MQTTuser || MQTTuser == "") {
+                        MQTTuser.clear();
+                    }
+                    doc["mqtt_username"] = MQTTuser;
+                }catch(...){}
 
-            try {
-                MQTTuser = getParamFromRequest(request, "mqtt_username")->value();
-                if (!MQTTuser || MQTTuser == "") {
-                    MQTTuser.clear();
-                }
-                doc["mqtt_username"] = MQTTuser;
-            }catch(...){}
+                try {
+                    MQTTpassword = getParamFromRequest(request, "mqtt_password")->value();
+                    if (!MQTTpassword || MQTTpassword == "") {
+                        MQTTpassword.clear();
+                    }
+                    doc["mqtt_password_set"] = (MQTTpassword != "");
+                }catch(...){}
 
-            try {
-                MQTTpassword = getParamFromRequest(request, "mqtt_password")->value();
-                if (!MQTTpassword || MQTTpassword == "") {
-                    MQTTpassword.clear();
-                }
-                doc["mqtt_password_set"] = (MQTTpassword != "");
-            }catch(...){}
-
-            SetupMQTTClient();
-            write_settings();
-            
+                SetupMQTTClient();
+                write_settings();
+            }            
         }catch(...){}
 #endif
 
@@ -4120,22 +4125,24 @@ void StartwebServer(void) {
             doc["battery_current"] = homeBatteryCurrent;
         } catch(...){}
 
-        if(MainsMeter == EM_API && getCurrentsFromRequest(request, Irms)) {
-            phasesLastUpdate = time(NULL);
-            int batteryPerPhase = getBatteryCurrent() / 3;
-            Isum = 0; 
-            for (int x = 0; x < 3; x++) {  
-                IrmsOriginal[x] = Irms[x];
-                doc["original"]["L" + x] = Irms[x];
-                Irms[x] -= batteryPerPhase;           
-                doc["L" + x] = Irms[x];
-                Isum = Isum + Irms[x];
+        if(MainsMeter == EM_API) {
+            if(getCurrentsFromRequest(request, Irms)) {
+                phasesLastUpdate = time(NULL);
+                int batteryPerPhase = getBatteryCurrent() / 3;
+                Isum = 0; 
+                for (int x = 0; x < 3; x++) {  
+                    IrmsOriginal[x] = Irms[x];
+                    doc["original"]["L" + x] = Irms[x];
+                    Irms[x] -= batteryPerPhase;           
+                    doc["L" + x] = Irms[x];
+                    Isum = Isum + Irms[x];
+                }
+                doc["TOTAL"] = Isum;
+
+                timeout = 10;
+
+                UpdateCurrentData();
             }
-            doc["TOTAL"] = Isum;
-
-            timeout = 10;
-
-            UpdateCurrentData();
         }
 
         String json;
@@ -4148,43 +4155,44 @@ void StartwebServer(void) {
     webServer.on("/ev_meter", HTTP_POST, [](AsyncWebServerRequest *request) {
         DynamicJsonDocument doc(200);
 
-        if(EVMeter != EM_API) {
-            request->send(422, "text/plain", "Error: EVMeter not set to EM_API");
-            return;
+        if(EVMeter == EM_API) {
+            if(getCurrentsFromRequest(request, Irms_EV)) {
+                if (LoadBl < 2) timeout = 10;
+
+                UpdateCurrentData();
+            }
+
+            try {
+                int importActiveEnergy = getParamFromRequest(request,"import_active_energy")->value().toInt();
+                int exportActiveEnergy = getParamFromRequest(request,"export_active_energy")->value().toInt();
+                int importActivePower  = getParamFromRequest(request,"import_active_power")->value().toInt();
+
+                EV_import_active_energy = importActiveEnergy;
+                EV_export_active_energy = exportActiveEnergy;
+                PowerMeasured = importActivePower;
+                
+                EnergyEV = EV_import_active_energy - EV_export_active_energy;
+                if (ResetKwh == 2) EnergyMeterStart = EnergyEV;                 // At powerup, set EnergyEV to kwh meter value
+                EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
+                if (Modem)
+                    RecomputeSoC();
+            }catch(...){}
         }
-
-        if(getCurrentsFromRequest(request, Irms_EV)) {
-            if (LoadBl < 2) timeout = 10;    
-
-            UpdateCurrentData();
-        }
-
-        try {
-            int importActiveEnergy = getParamFromRequest(request,"import_active_energy")->value().toInt();
-            int exportActiveEnergy = getParamFromRequest(request,"export_active_energy")->value().toInt();
-            int importActivePower  = getParamFromRequest(request,"import_active_power")->value().toInt();
-
-            EV_import_active_energy = importActiveEnergy;
-            EV_export_active_energy = exportActiveEnergy;
-            PowerMeasured = importActivePower;
-            
-            EnergyEV = EV_import_active_energy - EV_export_active_energy;
-            if (ResetKwh == 2) EnergyMeterStart = EnergyEV;                 // At powerup, set EnergyEV to kwh meter value
-            EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
-            if (Modem)
-                RecomputeSoC();
-        }catch(...){}
-        
         String json;
         serializeJson(doc, json);
         request->send(200, "application/json", json);
-
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
     });    
 
     webServer.on("/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
-        request->send(200, "application/json", "{\"reboot\": true}");
+        DynamicJsonDocument doc(200);
+        
         ESP.restart();
+        doc["reboot"] = true;
+
+        String json;
+        serializeJson(doc, json);
+        request->send(200, "application/json", json);
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
     });
 
