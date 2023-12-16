@@ -4194,7 +4194,7 @@ void StartwebServer(void) {
         //State of charge posting
         try {
             FullSoC = getParamFromRequest(request, "full_soc")->value().toInt();
-            doc["full_soc"] = FullSoc;
+            doc["full_soc"] = FullSoC;
         } catch(...){}
 
         // Energy requested by car
