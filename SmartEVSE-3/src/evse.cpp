@@ -3966,8 +3966,8 @@ void StartwebServer(void) {
                             //we couldn't parse the string, so no DelayedStopTime
                             DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
                         doc["stoptime"] = (DelayedStopTime.epoch2 ? DelayedStopTime.epoch2 + EPOCH2_OFFSET : 0);
-                    param = getParamFromRequest(request, "repeat");
-                    if (param != nullptr) {
+                        param = getParamFromRequest(request, "repeat");
+                        if (param != nullptr) {
                         int Repeat = param->value().toInt();
                             if (Repeat >= 0 && Repeat <= 1) {                                   //boundary check
                                 DelayedRepeat = Repeat;
