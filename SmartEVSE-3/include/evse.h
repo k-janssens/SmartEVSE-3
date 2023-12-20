@@ -83,8 +83,9 @@
 extern RemoteDebug Debug;
 #endif
 
-#define PHASE_DETECTION_TIME 44                                                 // Tesla seems to need up to 20 seconds to have all its phases activated
+#define PHASE_DETECTION_TIME 60                                                 // Tesla seems to need up to 20 seconds to have all its phases activated
                                                                                 // Polestar 2 seems to need up to 44 seconds
+                                                                                // Volvo C40 needs 60 seconds
 
 // Pin definitions left side ESP32
 #define PIN_TEMP 36
@@ -133,6 +134,7 @@ extern RemoteDebug Debug;
 
 #define ICAL 1024                                                               // Irms Calibration value (for Current transformers)
 #define MAX_MAINS 25                                                            // max Current the Mains connection can supply
+#define MAX_SUMMAINS 600                                                        // only used for capacity rate limiting, max current over the sum of all phases
 #define MAX_CURRENT 13                                                          // max charging Current for the EV
 #define MIN_CURRENT 6                                                           // minimum Current the EV will accept
 #define MODE 0                                                                  // Normal EVSE mode
@@ -188,6 +190,7 @@ extern RemoteDebug Debug;
 #define ACK_TIMEOUT 1000                                                        // 1000ms timeout
 #define NR_EVSES 8
 #define BROADCAST_ADR 0x09
+#define COMM_TIMEOUT 11
 
 #define STATE_A 0                                                               // A Vehicle not connected
 #define STATE_B 1                                                               // B Vehicle connected / not ready to accept energy
@@ -207,9 +210,9 @@ extern RemoteDebug Debug;
 
 #define NOSTATE 255
 
-#define PILOT_12V 1
-#define PILOT_9V 2
-#define PILOT_6V 3
+#define PILOT_12V 1                                                             // State A - vehicle disconnected
+#define PILOT_9V 2                                                              // State B - vehicle connected
+#define PILOT_6V 3                                                              // State C - EV charge
 #define PILOT_DIODE 4
 #define PILOT_NOK 0
 
@@ -330,9 +333,10 @@ extern RemoteDebug Debug;
 #define MENU_C2 38
 #define MENU_MAX_TEMP 39
 #define MENU_MODEM 40
-#define MENU_OFF 41                                                             // so access bit is reset and charging stops when pressing < button 2 seconds
-#define MENU_ON 42                                                              // so access bit is set and charging starts when pressing > button 2 seconds
-#define MENU_EXIT 43
+#define MENU_SUMMAINS 41
+#define MENU_OFF 42                                                             // so access bit is reset and charging stops when pressing < button 2 seconds
+#define MENU_ON 43                                                              // so access bit is set and charging starts when pressing > button 2 seconds
+#define MENU_EXIT 44
 
 #define MENU_STATE 50
 
@@ -460,7 +464,7 @@ const struct {
     {"EV ADDR", "Address of EV electric meter",                       MIN_METER_ADDRESS, MAX_METER_ADDRESS, EV_METER_ADDRESS},
 
     // System configuration
-    /* Key,    LCD,       Desc,                                                 Min, Max, Default */
+    /* LCD,       Desc,                                                 Min, Max, Default */
     {"MODE",    "Normal, Smart or Solar EVSE mode",                   0, 2, MODE},
     {"CIRCUIT", "EVSE Circuit max Current",                           10, 160, MAX_CIRCUIT},
     {"GRID",    "Grid type to which the Sensorbox is connected",      0, 1, GRID},
@@ -490,6 +494,7 @@ const struct {
     {"CONTACT2","Contactor2 (C2) behaviour",                          0, sizeof(StrEnableC2) / sizeof(StrEnableC2[0])-1, ENABLE_C2},
     {"MAX TEMP","Maximum temperature for the EVSE module",            40, 75, MAX_TEMPERATURE},
     {"MODEM",   "Is an ISO15118 modem installed (experimental)",      0, 1, NOTPRESENT},
+    {"SUMMAINS","Capacity Rate limit on sum of MAINS Current (A)",    10, 600, MAX_SUMMAINS},
     {"", "Hold 2 sec to stop charging", 0, 0, 0},
     {"", "Hold 2 sec to start charging", 0, 0, 0},
 

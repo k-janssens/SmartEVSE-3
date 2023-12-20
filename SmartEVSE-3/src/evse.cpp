@@ -113,6 +113,8 @@ const char StrRFIDStatusWeb[8][20] = {"Ready to read card","Present", "Card Stor
 
 // The following data will be updated by eeprom/storage data at powerup:
 uint16_t MaxMains = MAX_MAINS;                                              // Max Mains Amps (hard limit, limited by the MAINS connection) (A)
+uint16_t MaxSumMains = MAX_SUMMAINS;                                        // Max Mains Amps summed over all 3 phases, limit used by EU capacity rate
+                                                                            // see https://github.com/serkri/SmartEVSE-3/issues/215
 uint16_t MaxCurrent = MAX_CURRENT;                                          // Max Charge current (A)
 uint16_t MinCurrent = MIN_CURRENT;                                          // Minimal current the EV is happy with (A)
 uint16_t ICal = ICAL;                                                       // CT calibration value
@@ -772,15 +774,6 @@ void setState(uint8_t NewState) {
                         }
                         Detecting_Charging_Phases_Timer = PHASE_DETECTION_TIME;     // we need time for the EV to decide to start charging
                     }
-                    else if (MainsMeter) {                                          // or else MainsMeter will do
-                        OverrideCurrent_save = OverrideCurrent;
-                        OverrideCurrent = MinCurrent * 10;                          // for detection of phases we are going to lock the charging current to MinCurrent
-                        for (i=0; i<3; i++) {
-                            Old_Irms[i] = Irms[i];
-                            _LOG_D("Trying to detect Charging Phases START Irms[%i]=%.1f A.\n", i, (float)Irms[i]/10);
-                        }
-                        Detecting_Charging_Phases_Timer = PHASE_DETECTION_TIME;     // we need time for the EV to decide to start charging
-                    }
                 }
                 else //we are loadbalancing:
                     for (i=0; i<3; i++)
@@ -885,6 +878,10 @@ char IsCurrentAvailable(void) {
         if (Imeasured_EV > ((MaxCircuit - MinCurrent) * 10)) {                  // There should be at least 6A available
             return 0;                                                           // Not enough current available!, return with error
         }
+        //assume the current should be available on all 3 phases
+        if (Isum > (MaxSumMains - (MinCurrent * 3)) * 10) {                     // To guard capacity rate
+            return 0;                                                           // Not enough current available!, return with error
+        }
     } else {                                                                    // at least one active EVSE
         ActiveEVSE++;                                                           // Do calculations with one more EVSE
         Baseload = Imeasured - TotalCurrent;                                    // Calculate Baseload (load without any active EVSE)
@@ -904,7 +901,11 @@ char IsCurrentAvailable(void) {
         if ((ActiveEVSE * (MinCurrent * 10) + Baseload) > (MaxMains * 10)) {
             return 0;                                                           // Not enough current available!, return with error
         }
-        if ((ActiveEVSE * (MinCurrent * 10) + Baseload) > (MaxCircuit * 10) - Baseload_EV) {
+        if ((ActiveEVSE * (MinCurrent * 10) + Baseload_EV) > (MaxCircuit * 10)) {
+            return 0;                                                           // Not enough current available!, return with error
+        }
+        //assume the current should be available on all 3 phases
+        if ((3 * ActiveEVSE * (MinCurrent * 10) + Isum) > (MaxSumMains * 10)) {
             return 0;                                                           // Not enough current available!, return with error
         }
 
@@ -984,12 +985,16 @@ void CalcBalancedCurrent(char mod) {
             IsetBalanced = ChargeCurrent;                                       // No Load Balancing in Normal Mode. Set current to ChargeCurrent (fix: v2.05)
         if (BalancedLeft && mod) {                                              // Only if we have active EVSE's and New EVSE charging
             // Set max combined charge current to MaxMains - Baseload, or MaxCircuit - Baseload_EV if that is less
-            IsetBalanced = min((MaxMains * 10) - Baseload, (MaxCircuit * 10 ) - Baseload_EV);
+            IsetBalanced = min((MaxMains * 10) - Baseload, (MaxCircuit * 10 ) - Baseload_EV); //TODO: why are we checking MaxMains and MaxCircuit while we are in Normal mode?
+                                                                                              //TODO: capacity rate limiting here?
         }
     } //end MODE_NORMAL
     else { // start MODE_SOLAR || MODE_SMART
         // adapt IsetBalanced in Smart Mode, and ensure the MaxMains/MaxCircuit settings for Solar
-        Idifference = min((MaxMains * 10) - Imeasured, (MaxCircuit * 10) - Imeasured_EV);
+
+        uint8_t Temp_Phases;
+        Temp_Phases = (Nr_Of_Phases_Charging ? Nr_Of_Phases_Charging : 3);      // in case nr of phases not detected, assume 3
+        Idifference = min((MaxMains * 10) - Imeasured, min((MaxCircuit * 10) - Imeasured_EV, ((MaxSumMains * 10) - Isum)/Temp_Phases));
         if (!mod) {                                                             // no new EVSE's charging
                                                                                 // For Smart mode, no new EVSE asking for current
                                                                                 // But for Solar mode we _also_ have to guard MaxCircuit and Maxmains!
@@ -1052,7 +1057,7 @@ void CalcBalancedCurrent(char mod) {
         else { // MODE_SMART
         // New EVSE charging, and only if we have active EVSE's
             if (mod && BalancedLeft) {                                          // Set max combined charge current to MaxMains - Baseload
-                IsetBalanced = min((MaxMains * 10) - Baseload, (MaxCircuit * 10 ) - Baseload_EV);
+                IsetBalanced = min((MaxMains * 10) - Baseload, min((MaxCircuit * 10 ) - Baseload_EV, ((MaxSumMains * 10) - Isum)/3)); //assume the current should be available on all 3 phases
             }
         } //end MODE_SMART
     } // end MODE_SOLAR || MODE_SMART
@@ -1305,6 +1310,9 @@ uint8_t setItemValue(uint8_t nav, uint16_t val) {
         case MENU_MAINS:
             MaxMains = val;
             break;
+        case MENU_SUMMAINS:
+            MaxSumMains = val;
+            break;
         case MENU_MIN:
             MinCurrent = val;
             break;
@@ -1407,7 +1415,7 @@ uint8_t setItemValue(uint8_t nav, uint16_t val) {
             break;
         case STATUS_CURRENT:
             OverrideCurrent = val;
-            timeout = 10;                                                       // reset timeout when register is written
+            timeout = COMM_TIMEOUT;                                             // reset timeout when register is written
             break;
         case STATUS_SOLAR_TIMER:
             setSolarStopTimer(val);
@@ -1457,6 +1465,8 @@ uint16_t getItemValue(uint8_t nav) {
             return LoadBl;
         case MENU_MAINS:
             return MaxMains;
+        case MENU_SUMMAINS:
+            return MaxSumMains;
         case MENU_MIN:
             return MinCurrent;
         case MENU_MAX:
@@ -2045,7 +2055,7 @@ void EVSEStates(void * parameter) {
             LCDupdate = 0;
         }    
 
-        if ((ErrorFlags & CT_NOCOMM) && timeout == 10) ErrorFlags &= ~CT_NOCOMM;          // Clear communication error, if present
+        if ((ErrorFlags & CT_NOCOMM) && timeout >= COMM_TIMEOUT) ErrorFlags &= ~CT_NOCOMM; // Clear communication error, if present
         
         // Pause the task for 10ms
         vTaskDelay(10 / portTICK_PERIOD_MS);
@@ -2290,6 +2300,13 @@ void mqtt_receive_callback(const String &topic, const String &payload) {
                 OverrideCurrent = RequestedCurrent;
             }
         }
+    } else if (topic == MQTTprefix + "/Set/CurrentMaxSumMains") {
+        uint16_t RequestedCurrent = payload.toInt();
+        if (RequestedCurrent == 0) {
+            MaxSumMains = 0;
+        } else if (RequestedCurrent >= (10 * 10) && RequestedCurrent <= (600 * 10)) {
+                MaxSumMains = RequestedCurrent;
+        }
     } else if (topic == MQTTprefix + "/Set/CPPWMOverride") {
         int pwm = payload.toInt();
         if (pwm == -1) {
@@ -2316,7 +2333,7 @@ void mqtt_receive_callback(const String &topic, const String &payload) {
             phasesLastUpdate = time(NULL);
 
             if (LoadBl < 2)
-                timeout = 20;
+                timeout = COMM_TIMEOUT;
             if ((ErrorFlags & CT_NOCOMM))
                 ErrorFlags &= ~CT_NOCOMM; // Clear communication error, if present
 
@@ -2787,7 +2804,7 @@ void Timer1S(void * parameter) {
         // and send broadcast to Node controllers.
         if (LoadBl < 2 && !Broadcast--) {                // Load Balancing mode: Master or Disabled
             ModbusRequest = 1;                                          // Start with state 1, also in Normal mode we want MainsMeter and EVmeter updated 
-            //timeout = 10; not sure if necessary, statement was missing in original code    // reset timeout counter (not checked for Master)
+            //timeout = COMM_TIMEOUT; not sure if necessary, statement was missing in original code    // reset timeout counter (not checked for Master)
             Broadcast = 1;                                                  // repeat every two seconds
         }
 
@@ -2811,10 +2828,6 @@ void Timer1S(void * parameter) {
                         Charging_Prob[i] = 10 * (abs(Irms_EV[i] - Old_Irms[i])) / MinCurrent;    //100% means this phase is charging, 0% mwans not charging
                         _LOG_D("Trying to detect Charging Phases END Irms_EV[%i]=%.1f A.\n", i, (float)Irms_EV[i]/10);
                     }     //TODO only working in Smart Mode                                                                         //TODO we start charging with ChargeCurrent but in Smart mode this changes to Balanced[0]; how about Solar? generates error 32?
-                    else if (MainsMeter) {
-                        Charging_Prob[i] = 10 * (abs(Irms[i] - Old_Irms[i])) / MinCurrent;    //100% means this phase is charging, 0% mwans not charging
-                        _LOG_D("Trying to detect Charging Phases END Irms_[%i]=%.1f A.\n", i, (float)Irms[i]/10);
-                    }
                     else
                         Charging_Prob[i] = 0;
                     Max_Charging_Prob = max(Charging_Prob[i], Max_Charging_Prob);
@@ -3007,7 +3020,7 @@ ModbusMessage MBEVMeterResponse(ModbusMessage request) {
         } else if (MB.Register == EMConfig[EVMeter].IRegister) {
             // Current measurement
             x = receiveCurrentMeasurement(MB.Data, EVMeter, EV );
-            if (x && LoadBl <2) timeout = 10;                   // only reset timeout when data is ok, and Master/Disabled
+            if (x && LoadBl <2) timeout = COMM_TIMEOUT;                     // only reset timeout when data is ok, and Master/Disabled
             for (x = 0; x < 3; x++) {
                 // CurrentMeter and PV values are MILLI AMPERE
                 Irms_EV[x] = (signed int)(EV[x] / 100);            // Convert to AMPERE * 10
@@ -3052,7 +3065,7 @@ ModbusMessage MBMainsMeterResponse(ModbusMessage request) {
 
         //_LOG_A("Mains Meter Response\n");
             x = receiveCurrentMeasurement(MB.Data, MainsMeter, CM);
-            if (x && LoadBl <2) timeout = 10;                   // only reset timeout when data is ok, and Master/Disabled
+            if (x && LoadBl <2) timeout = COMM_TIMEOUT;         // only reset timeout when data is ok, and Master/Disabled
 
             // Calculate Isum (for nodes and master)
 
@@ -3194,7 +3207,7 @@ ModbusMessage MBbroadcast(ModbusMessage request) {
                     if (Balanced[0] == 0 && State == STATE_C) setState(STATE_C1);               // tell EV to stop charging if charge current is zero
                     else if ((State == STATE_B) || (State == STATE_C)) SetCurrent(Balanced[0]); // Set charge current, and PWM output
                     _LOG_V("Broadcast received, Node %u.%1u A\n", Balanced[0]/10, Balanced[0]%10);
-                    timeout = 10;                                   // reset 10 second timeout
+                    timeout = COMM_TIMEOUT;                     // reset 10 second timeout
                 } else {
                     //WriteMultipleItemValueResponse();
                     if (ItemID) {
@@ -3426,6 +3439,7 @@ void read_settings(bool write) {
         Access_bit = preferences.getUChar("Access", Default_Access_bit);
         LoadBl = preferences.getUChar("LoadBl", LOADBL); 
         MaxMains = preferences.getUShort("MaxMains", MAX_MAINS); 
+        MaxSumMains = preferences.getUShort("MaxSumMains", MAX_SUMMAINS);
         MaxCurrent = preferences.getUShort("MaxCurrent", MAX_CURRENT); 
         MinCurrent = preferences.getUShort("MinCurrent", MIN_CURRENT); 
         MaxCircuit = preferences.getUShort("MaxCircuit", MAX_CIRCUIT); 
@@ -3496,6 +3510,7 @@ void write_settings(void) {
     preferences.putUChar("Access", Access_bit);
     preferences.putUChar("LoadBl", LoadBl); 
     preferences.putUShort("MaxMains", MaxMains); 
+    preferences.putUShort("MaxSumMains", MaxSumMains);
     preferences.putUShort("MaxCurrent", MaxCurrent); 
     preferences.putUShort("MinCurrent", MinCurrent); 
     preferences.putUShort("MaxCircuit", MaxCircuit); 
@@ -3770,8 +3785,6 @@ void StartwebServer(void) {
             doc["wifi"]["ssid"] = WiFi.SSID();    
             doc["wifi"]["rssi"] = WiFi.RSSI();    
             doc["wifi"]["bssid"] = WiFi.BSSIDstr();  
-            doc["wifi"]["auto_connect"] = WiFi.getAutoConnect();  
-            doc["wifi"]["auto_reconnect"] = WiFi.getAutoReconnect();   
         }
         
         doc["evse"]["temp"] = TempEVSE;
@@ -3793,6 +3806,7 @@ void StartwebServer(void) {
         doc["settings"]["current_min"] = MinCurrent;
         doc["settings"]["current_max"] = MaxCurrent;
         doc["settings"]["current_main"] = MaxMains;
+        doc["settings"]["current_max_sum_mains"] = MaxSumMains;
         doc["settings"]["solar_max_import"] = ImportCurrent;
         doc["settings"]["solar_start_current"] = StartCurrent;
         doc["settings"]["solar_stop_time"] = StopTime;
@@ -3890,6 +3904,18 @@ void StartwebServer(void) {
                 write_settings();
             } else {
                 doc["current_min"] = "Value not allowed!";
+            }
+        }
+
+        param = getParamFromRequest(request, "current_max_sum_mains");
+        if (param != nullptr) {
+            int current = param->value().toInt();
+            if(current >= 10 && current <= 600) {
+                MaxSumMains = current;
+                doc["current_max_sum_mains"] = MaxSumMains;
+                write_settings();
+            } else {
+                doc["current_max_sum_mains"] = "Value not allowed!";
             }
         }
 
@@ -4157,7 +4183,7 @@ void StartwebServer(void) {
                 }
                 doc["TOTAL"] = Isum;
 
-                timeout = 10;
+                timeout = COMM_TIMEOUT;
 
                 UpdateCurrentData();
             }
@@ -4175,7 +4201,7 @@ void StartwebServer(void) {
 
         if(EVMeter == EM_API) {
             if(getCurrentsFromRequest(request, Irms_EV)) {
-                if (LoadBl < 2) timeout = 10;
+                if (LoadBl < 2) timeout = COMM_TIMEOUT;
 
                 UpdateCurrentData();
             }
@@ -4358,6 +4384,15 @@ void onWifiEvent(WiFiEvent_t event) {
   }
 }
 
+// turns out getLocalTime only checks if the current year > 2016, and if so, decides NTP must have synced;
+// this callback function actually checks if we are synced!
+void timeSyncCallback(struct timeval *tv)
+{
+    LocalTimeSet = true;
+    _LOG_A("Synced clock to NTP server!");    // somehow adding a \n here hangs the device after printing this message ?!?
+}
+
+
 // Setup Wifi 
 void WiFiSetup(void) {
 
@@ -4380,19 +4415,15 @@ void WiFiSetup(void) {
     // Init and get the time
     sntp_servermode_dhcp(1);                                                    //try to get the ntp server from dhcp
     sntp_setservername(1, "europe.pool.ntp.org");                               //fallback server
+    sntp_set_time_sync_notification_cb(timeSyncCallback);
     sntp_init();
     String TZ_INFO = ESPAsync_wifiManager.getTZ(TZname.c_str());
     setenv("TZ",TZ_INFO.c_str(),1);
     tzset();
-    //if(!getLocalTime(&timeinfo)) _LOG_A("Failed to obtain time\n");
-    
-    // test code, sets time to 31-OCT, 02:59:50 , 10 seconds before DST will be switched off
-    //timeval epoch = {1635641990, 0};                    
-    //settimeofday((const timeval*)&epoch, 0);            
 
 #if DBG != 0
     // Initialize the server (telnet or web socket) of RemoteDebug
-    Debug.begin(APhostname, 23, 3);
+    Debug.begin(APhostname, 23, 1);
     Debug.showColors(true); // Colors
 #if DBG == 2
     Debug.setSerialEnabled(true); // if you wants serial echo - only recommended if ESP is plugged in USB
@@ -4684,14 +4715,14 @@ void setup() {
 void loop() {
 
     delay(1000);
-    // retrieve time from NTP server
-    LocalTimeSet = getLocalTime(&timeinfo, 1000U);
+    getLocalTime(&timeinfo, 1000U);
+    if (!LocalTimeSet)
+        _LOG_A("Time not synced with NTP yet.\n");
 
 #ifndef DEBUG_DISABLED
     // Remote debug over WiFi
     Debug.handle();
 #endif
-
 
     // TODO move this to a once a minute loop?
     if (DelayedStartTime.epoch2 && LocalTimeSet) {
