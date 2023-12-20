@@ -3641,10 +3641,7 @@ AsyncWebParameter * getParamFromRequest(AsyncWebServerRequest *request, String n
     if (request->hasParam(name, true)){
         return request->getParam(name, true);
     }
-    if (request->hasParam(name)){
-        return request->getParam(name);
-    }
-    throw 1;
+    return request->getParam(name);
 }
 
 
@@ -3876,15 +3873,17 @@ void StartwebServer(void) {
 
     webServer.on("/settings", HTTP_POST, [](AsyncWebServerRequest *request) {
         DynamicJsonDocument doc(512); // https://arduinojson.org/v6/assistant/
-
-        try {
-            int backlight = getParamFromRequest(request, "backlight")->value().toInt();
+        
+        AsyncWebParameter* param = getParamFromRequest(request, "backlight");
+        if (param != nullptr) {
+            int backlight = param->value().toInt();
             BacklightTimer = backlight * BACKLIGHT;
             doc["Backlight"] = backlight;
-        }catch(...){}
+        }
 
-        try {
-            int current = getParamFromRequest(request, "current_min")->value().toInt();
+        param = getParamFromRequest(request, "current_min");
+        if (param != nullptr) {
+            int current = param->value().toInt();
             if(current >= 6 && current <= 16) {
                 MinCurrent = current;
                 doc["current_min"] = MinCurrent;
@@ -3892,20 +3891,22 @@ void StartwebServer(void) {
             } else {
                 doc["current_min"] = "Value not allowed!";
             }
-        }catch(...){}
+        }
 
-        try {
-            getParamFromRequest(request, "disable_override_current");
+        param = getParamFromRequest(request, "disable_override_current");
+        if (param != nullptr) {
             OverrideCurrent = 0;
             doc["disable_override_current"] = "OK";
-        }catch(...){}
+        }
 
-        try {
-            String mode = getParamFromRequest(request, "mode")->value();
+        param = getParamFromRequest(request, "mode");
+        if (param != nullptr) {
+            String mode = param->value();
 
             //first check if we have a delayed mode switch
-            try {
-                String DelayedStartTimeStr = getParamFromRequest(request, "starttime")->value();
+            param = getParamFromRequest(request, "starttime");
+            if (param != nullptr) {
+                String DelayedStartTimeStr = param->value();
                 //string time_str = "2023-04-14T11:31";
                 if (!StoreTimeString(DelayedStartTimeStr, &DelayedStartTime)) {
                     //parse OK
@@ -3927,8 +3928,9 @@ void StartwebServer(void) {
                 // so now we might have a starttime and we might be Delayed Charging
                 if (DelayedStartTime.epoch2) {
                     //we only accept a DelayedStopTime if we have a valid DelayedStartTime
-                    try {
-                        String DelayedStopTimeStr = getParamFromRequest(request, "stoptime")->value();
+                    param = getParamFromRequest(request, "stoptime");
+                    if (param != nullptr) {
+                        String DelayedStopTimeStr = param->value();
                         //string time_str = "2023-04-14T11:31";
                         if (!StoreTimeString(DelayedStopTimeStr, &DelayedStopTime)) {
                             //parse OK
@@ -3940,18 +3942,19 @@ void StartwebServer(void) {
                             //we couldn't parse the string, so no DelayedStopTime
                             DelayedStopTime.epoch2 = DELAYEDSTOPTIME;
                         doc["stoptime"] = (DelayedStopTime.epoch2 ? DelayedStopTime.epoch2 + EPOCH2_OFFSET : 0);
-                        try{
-                            int Repeat = getParamFromRequest(request, "repeat")->value().toInt();
+                    param = getParamFromRequest(request, "repeat");
+                    if (param != nullptr) {
+                        int Repeat = param->value().toInt();
                             if (Repeat >= 0 && Repeat <= 1) {                                   //boundary check
                                 DelayedRepeat = Repeat;
                                 doc["repeat"] = Repeat;
                             }
-                        } catch(...){}
-                    }catch(...){}
+                        }
+                    }
 
                 }
                 doc["starttime"] = (DelayedStartTime.epoch2 ? DelayedStartTime.epoch2 + EPOCH2_OFFSET : 0);
-            }catch(...){}
+            }
 
             switch(mode.toInt()) {
                 case 0: // OFF
@@ -3974,20 +3977,23 @@ void StartwebServer(void) {
                     mode = "Value not allowed!";
             }
             doc["mode"] = mode;
-        }catch(...){}
+        }
 
-        try {
-            EnableC2 = (EnableC2_t) getParamFromRequest(request, "enable_C2")->value().toInt();
+        param = getParamFromRequest(request, "enable_C2");
+        if (param != nullptr) {
+            EnableC2 = (EnableC2_t) param->value().toInt();
             write_settings();
             doc["settings"]["enable_C2"] = StrEnableC2[EnableC2];
-        }catch(...){}
+        }
 
-        try {
-            Modem = (Modem_t) getParamFromRequest(request, "modem")->value().toInt();
+        param = getParamFromRequest(request, "modem");
+        if (param != nullptr) {
+            Modem = (Modem_t) param->value().toInt();
             doc["settings"]["modem"] = StrModem[Modem];
-        }catch(...){}
+        }
 
-        try {
+        param = getParamFromRequest(request, "stop_timer");
+        if (param != nullptr) {
             int stop_timer = getParamFromRequest(request, "stop_timer")->value().toInt();
 
             if(stop_timer >= 0 && stop_timer <= 60) {
@@ -3997,22 +4003,24 @@ void StartwebServer(void) {
             } else {
                 doc["stop_timer"] = false;
             }
-        }catch(...){}
+        }
 
         if(Mode == MODE_NORMAL || Mode == MODE_SMART) {
-            try {
-                int current = getParamFromRequest(request, "override_current")->value().toInt();
+            param = getParamFromRequest(request, "override_current");
+            if (param != nullptr) {
+                int current = param->value().toInt();
                 if(current == 0 || (current >= ( MinCurrent * 10 ) && current <= ( MaxCurrent * 10 ))) {
                     OverrideCurrent = current;
                     doc["override_current"] = OverrideCurrent;
                 } else {
                     doc["override_current"] = "Value not allowed!";
                 }
-            }catch(...){}
+            }
         }
 
-        try {
-            int current = getParamFromRequest(request, "solar_start_current")->value().toInt();
+        param = getParamFromRequest(request, "solar_start_current");
+        if (param != nullptr) {
+            int current = param->value().toInt();
             if(current >= 0 && current <= 48) {
                 StartCurrent = current;
                 doc["solar_start_current"] = StartCurrent;
@@ -4020,10 +4028,11 @@ void StartwebServer(void) {
             } else {
                 doc["solar_start_current"] = "Value not allowed!";
             }
-        }catch(...){}
+        }
 
-        try {
-            int current = getParamFromRequest(request, "solar_max_import")->value().toInt();
+        param = getParamFromRequest(request, "solar_max_import");
+        if (param != nullptr) {
+            int current = param->value().toInt();
             if(current >= 0 && current <= 48) {
                 ImportCurrent = current;
                 doc["solar_max_import"] = ImportCurrent;
@@ -4031,11 +4040,11 @@ void StartwebServer(void) {
             } else {
                 doc["solar_max_import"] = "Value not allowed!";
             }
-        }catch(...){}
-
+        }
         //special section to post stuff for experimenting with an ISO15118 modem
-        try {
-            int pwm = getParamFromRequest(request, "override_pwm")->value().toInt();
+        param = getParamFromRequest(request, "override_pwm");
+        if (param != nullptr) {
+            int pwm = param->value().toInt();
             if (pwm == 0){
                 CP_OFF;
                 CPDutyOverride = true;
@@ -4050,12 +4059,13 @@ void StartwebServer(void) {
 
             SetCPDuty(pwm);
             doc["override_pwm"] = pwm;
-        }catch(...){}
+        }
 
         //allow basic plug 'n charge based on evccid
         //if required_evccid is set to a value, SmartEVSE will only allow charging requests from said EVCCID
-        try {
-            String value = getParamFromRequest(request, "required_evccid")->value();
+        param = getParamFromRequest(request, "required_evccid");
+        if (param != nullptr) {
+            String value = param->value();
             if (value.length() <= 32) {
                 strncpy(RequiredEVCCID, value.c_str(), sizeof(RequiredEVCCID));
                 doc["required_evccid"] = RequiredEVCCID;
@@ -4063,50 +4073,57 @@ void StartwebServer(void) {
             } else {
                 doc["required_evccid"] = "EVCCID too long (max 32 char)";
             }
-        }catch(...){}
+        }
 
 #ifdef MQTT
-        try {
-            if (getParamFromRequest(request, "mqtt_update")->value().toInt() == 1) {
-                try {
-                    MQTTHost = getParamFromRequest(request, "mqtt_host")->value();
-                    doc["mqtt_host"] = MQTTHost;
-                }catch(...){}
+        param = getParamFromRequest(request, "mqtt_update");
+        if (param != nullptr) {
+            if (param->value().toInt() == 1) {
 
-                try {
-                    MQTTPort = getParamFromRequest(request, "mqtt_port")->value().toInt();
+                param = getParamFromRequest(request, "mqtt_host");
+                if (param != nullptr) {
+                    MQTTHost = param->value();
+                    doc["mqtt_host"] = MQTTHost;
+                }
+
+                param = getParamFromRequest(request, "mqtt_port");
+                if (param != nullptr) {
+                    MQTTPort = param->value().toInt();
                     if (MQTTPort == 0) MQTTPort = 1883;
                     doc["mqtt_port"] = MQTTPort;
-                }catch(...){}
+                }
 
-                try {
-                    MQTTprefix = getParamFromRequest(request, "mqtt_topic_prefix")->value();
+                param = getParamFromRequest(request, "mqtt_topic_prefix");
+                if (param != nullptr) {
+                    MQTTprefix = param->value();
                     if (!MQTTprefix || MQTTprefix == "") {
                         MQTTprefix = APhostname;
                     }
                     doc["mqtt_topic_prefix"] = MQTTprefix;
-                }catch(...){}
+                }
 
-                try {
-                    MQTTuser = getParamFromRequest(request, "mqtt_username")->value();
+                param = getParamFromRequest(request, "mqtt_username");
+                if (param != nullptr) {
+                    MQTTuser = param->value();
                     if (!MQTTuser || MQTTuser == "") {
                         MQTTuser.clear();
                     }
                     doc["mqtt_username"] = MQTTuser;
-                }catch(...){}
+                }
 
-                try {
-                    MQTTpassword = getParamFromRequest(request, "mqtt_password")->value();
+                param = getParamFromRequest(request, "required_evccid");
+                if (param != nullptr) {
+                    MQTTpassword = param->value();
                     if (!MQTTpassword || MQTTpassword == "") {
                         MQTTpassword.clear();
                     }
                     doc["mqtt_password_set"] = (MQTTpassword != "");
-                }catch(...){}
+                }
 
                 SetupMQTTClient();
                 write_settings();
-            }            
-        }catch(...){}
+            }
+        }
 #endif
 
         String json;
@@ -4119,11 +4136,12 @@ void StartwebServer(void) {
     webServer.on("/currents", HTTP_POST, [](AsyncWebServerRequest *request) {
         DynamicJsonDocument doc(200);
 
-        try {
-            homeBatteryCurrent = getParamFromRequest(request,"battery_current")->value().toInt();
+        AsyncWebParameter* param = getParamFromRequest(request, "battery_current");
+        if (param != nullptr) {
+            homeBatteryCurrent = param->value().toInt();
             homeBatteryLastUpdate = time(NULL);
             doc["battery_current"] = homeBatteryCurrent;
-        } catch(...){}
+        }
 
         if(MainsMeter == EM_API) {
             if(getCurrentsFromRequest(request, Irms)) {
@@ -4162,10 +4180,13 @@ void StartwebServer(void) {
                 UpdateCurrentData();
             }
 
-            try {
-                int importActiveEnergy = getParamFromRequest(request,"import_active_energy")->value().toInt();
-                int exportActiveEnergy = getParamFromRequest(request,"export_active_energy")->value().toInt();
-                int importActivePower  = getParamFromRequest(request,"import_active_power")->value().toInt();
+            AsyncWebParameter* param1 = getParamFromRequest(request,"import_active_energy");
+            AsyncWebParameter* param2 = getParamFromRequest(request,"export_active_energy");
+            AsyncWebParameter* param3 = getParamFromRequest(request,"import_active_power");
+            if (param1 != nullptr && param2 != nullptr && param3 != nullptr) {
+                int importActiveEnergy = param1->value().toInt();
+                int exportActiveEnergy = param2->value().toInt();
+                int importActivePower  = param3->value().toInt();
 
                 EV_import_active_energy = importActiveEnergy;
                 EV_export_active_energy = exportActiveEnergy;
@@ -4176,17 +4197,19 @@ void StartwebServer(void) {
                 EnergyCharged = EnergyEV - EnergyMeterStart;                    // Calculate Energy
                 if (Modem)
                     RecomputeSoC();
-            }catch(...){}
+            }
         }
+
         String json;
         serializeJson(doc, json);
         request->send(200, "application/json", json);
+
     },[](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
     });    
 
     webServer.on("/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
         DynamicJsonDocument doc(200);
-        
+
         ESP.restart();
         doc["reboot"] = true;
 
@@ -4200,34 +4223,45 @@ void StartwebServer(void) {
         DynamicJsonDocument doc(200);
 
         //State of charge posting
-        try {
-            FullSoC = getParamFromRequest(request, "full_soc")->value().toInt();
-            doc["full_soc"] = FullSoC;
-        } catch(...){}
+        AsyncWebParameter* param = getParamFromRequest(request, "full_soc");
+        if (param != nullptr) {
+            int full_soc = param->value().toInt();
+            doc["full_soc"] = full_soc;
+            if (full_soc >= FullSoC)
+                FullSoC = full_soc;
+        }
 
         // Energy requested by car
-        try {
-            EnergyRequest = getParamFromRequest(request, "energy_request")->value().toInt();
+        param = getParamFromRequest(request, "energy_request");
+        if (param != nullptr) {
+            int energy_request = param->value().toInt();
             doc["energy_request"] = EnergyRequest;
-        } catch(...){}
+            if (energy_request >= EnergyRequest) 
+                EnergyRequest = energy_request;
+        }
 
         // Total energy capacity of car's battery
-        try {
-            EnergyCapacity = getParamFromRequest(request, "energy_capacity")->value().toInt();
-            doc["energy_capacity"] = EnergyCapacity;
-        } catch(...){}
+        param = getParamFromRequest(request, "energy_capacity");
+        if (param != nullptr) {
+            int energy_capacity = param->value().toInt();
+            doc["energy_capacity"] = energy_capacity;
+            if (energy_capacity >= EnergyCapacity)
+                EnergyCapacity = energy_capacity;
+        }
 
         // Update EVCCID of car
-        try {
-            String newEvccid = getParamFromRequest(request, "evccid")->value();
+        param = getParamFromRequest(request, "evccid");
+        if (param != nullptr) {
+            String newEvccid = param->value();
             if (newEvccid.length() <= 32) {
                 strncpy(EVCCID, newEvccid.c_str(), sizeof(EVCCID));
                 doc["evccid"] = EVCCID;
             }
-        } catch(...){}
+        }
 
-        try {
-            int current_soc = getParamFromRequest(request, "current_soc")->value().toInt();
+        param = getParamFromRequest(request, "current_soc");
+        if (param != nullptr) {
+            int current_soc = param->value().toInt();
             if (current_soc >= 0 && current_soc <= 100) {
                 // We set the InitialSoC for our own calculations
                 InitialSoC = current_soc;
@@ -4242,7 +4276,7 @@ void StartwebServer(void) {
                 }
             }
             doc["current_soc"] = current_soc;
-        } catch(...){}
+        }
 
         RecomputeSoC();
 
@@ -4261,8 +4295,9 @@ void StartwebServer(void) {
         //max 5 meters allowed, of which mainsmeter, evmeter and pvmeter might already be taken
         //TODO not sure what happens if you exceed this maximum, since attachServer always returns true....
         //has to be activated after every reboot
-        try{
-            int address = getParamFromRequest(request,"bridge_meter_address")->value().toInt();
+        AsyncWebParameter* param = getParamFromRequest(request, "bridge_meter_address");
+        if (param != nullptr) {
+            int address = param->value().toInt();
             doc["bridge_meter_address"] = "Value not allowed";                  //will be overwritten when success bridging
             if ( address >= 10 && address <= 249) {
                 MBbridge.attachServer(MainsMeterAddress, MainsMeterAddress, ANY_FUNCTION_CODE, &MBclient);
@@ -4271,7 +4306,7 @@ void StartwebServer(void) {
             String json;
             serializeJson(doc, json);
             request->send(200, "application/json", json);
-        } catch(...){
+        } else {
             request->send(400, "text/plain", "Error: missing parameter 'bridge_meter_address'");
         }
     });
@@ -4279,13 +4314,14 @@ void StartwebServer(void) {
 #ifdef FAKE_RFID
     //this can be activated by: http://smartevse-xxx.lan/debug?showrfid=1
     webServer.on("/debug", HTTP_GET, [](AsyncWebServerRequest *request) {
-        try{
-            Show_RFID = strtol(getParamFromRequest(request, "showrfid")->value().c_str(),NULL,0);
-            _LOG_A("DEBUG: Show_RFID=%u.\n",Show_RFID);
+        AsyncWebParameter* param = getParamFromRequest(request, "showrfid");
+        if (param != nullptr) {
+            Show_RFID = strtol(param->value().c_str(),NULL,0);
             request->send(200, "text/html", "Finished request");
-        } catch(...){
+        } else {
             request->send(400, "text/plain", "Error: missing parameter 'showrfid'")
         }
+        _LOG_A("DEBUG: Show_RFID=%u.\n",Show_RFID);
     });
 #endif
 
