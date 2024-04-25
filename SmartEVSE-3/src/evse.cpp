@@ -4275,7 +4275,7 @@ void StartwebServer(void) {
             int address = request->getParam("bridge_meter_address")->value().toInt();
             doc["bridge_meter_address"] = "Value not allowed";                  //will be overwritten when success bridging
             if ( address >= 10 && address <= 249) {
-                MBbridge.attachServer(MainsMeterAddress, MainsMeterAddress, ANY_FUNCTION_CODE, &MBclient);
+                MBbridge.attachServer(address, address, ANY_FUNCTION_CODE, &MBclient);
                 doc["bridge_meter_address"] = address;
             }
             String json;

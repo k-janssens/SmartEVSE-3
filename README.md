@@ -163,6 +163,13 @@ The addresses on the tcp modbus are the same addresses as they are on the RTU mo
 E.g. my MainsMeter is at slave address 0x0a, so this command reads register 70decimal and following:<br />
 mbpoll -a10 -t 3:hex -r 70 -c 10 10.0.0.76
 
+Note: if you want to read from a modbus-address which is not used by SmartEVSE you need to register this address by:
+```
+curl -X POST http://smartevse-xxxxx.lan/modbus?bridge_meter_address=xxx
+```
+
+_Be aware this function unfortunately about to be removed in version [dingo35/SmartEVSE-3.5](https://github.com/dingo35/SmartEVSE-3.5)_ 
+
 # Simple Timer
 
 There is a simple timer implemented on the webserver, for Delayed Charging.
